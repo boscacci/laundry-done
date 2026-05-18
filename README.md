@@ -49,6 +49,9 @@ flowchart LR
    docker compose up -d --build
    ```
 
+   Gotify Android login uses username `admin`. The password is
+   `GOTIFY_DEFAULTUSER_PASS` from the server-side `.env` file.
+
 5. Copy `firmware/include/laundry_config.h.example` to
    `firmware/include/laundry_config.h`, set Wi-Fi and relay values, then upload:
 

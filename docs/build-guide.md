@@ -84,7 +84,33 @@ Health check:
 curl http://<optiplex-lan-static-ip>:8088/healthz
 ```
 
-## 4. Mount The Puck
+## 4. Log In From Android
+
+Install the Gotify Android app from Google Play or F-Droid.
+
+Use these settings:
+
+| Field | Value |
+| --- | --- |
+| Server URL on home Wi-Fi | `http://<optiplex-lan-static-ip>:8089` |
+| Server URL over Tailscale | `http://100.124.5.39:8089` |
+| Username | `admin` |
+| Password | The `GOTIFY_DEFAULTUSER_PASS` value in `~/repos/laundry-done/.env` on `optiplex-lan` |
+
+To copy the password from your Mac without printing it:
+
+```bash
+ssh optiplex-lan 'cd ~/repos/laundry-done && awk -F= "/^GOTIFY_DEFAULTUSER_PASS=/{print \$2}" .env' | pbcopy
+```
+
+If you need to show it in a terminal on the server:
+
+```bash
+cd ~/repos/laundry-done
+awk -F= '/^GOTIFY_DEFAULTUSER_PASS=/{print $2}' .env
+```
+
+## 5. Mount The Puck
 
 Your photos show a stacked GE washer/dryer with a shared cabinet. Use one sensor
 puck for v1.
@@ -109,7 +135,7 @@ Recommended physical build:
    the enclosure pressed flat.
 4. Add hot glue or heat-shrink as strain relief where the USB cable enters.
 
-## 5. Calibrate With Real Cycles
+## 6. Calibrate With Real Cycles
 
 Open serial monitor during one washer run and one dryer run:
 
@@ -135,7 +161,7 @@ Only tune after observing real logs. If the dryer never crosses active motion,
 lower `active_threshold_mg` in `DetectorConfig`. If foot traffic or door bumps
 start cycles, raise it slightly or mount the puck lower on the appliance body.
 
-## 6. Expected Alerts
+## 7. Expected Alerts
 
 Normal sequence:
 
