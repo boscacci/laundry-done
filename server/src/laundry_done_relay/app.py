@@ -78,14 +78,14 @@ def app_from_env() -> FastAPI:
     )
 
 
-app = app_from_env() if os.environ.get("LAUNDRY_RELAY_FROM_ENV") == "1" else FastAPI()
-
-
 def _required_env(name: str) -> str:
     value = os.environ.get(name)
     if not value:
         raise RuntimeError(f"{name} is required")
     return value
+
+
+app = app_from_env() if os.environ.get("LAUNDRY_RELAY_FROM_ENV") == "1" else FastAPI()
 
 
 def _init_db(path: Path) -> None:
