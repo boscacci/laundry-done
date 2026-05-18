@@ -1,0 +1,8 @@
+.DS_Store
+.pio/
+.pytest_cache/
+__pycache__/
+*.pyc
+.env
+data/
+firmware/include/laundry_config.h

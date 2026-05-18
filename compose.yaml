@@ -1,0 +1,19 @@
+services:
+  relay:
+    build: ./server
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_PATH: /data/events.sqlite3
+    ports:
+      - "8088:8080"
+    volumes:
+      - ./data/relay:/data
+
+  gotify:
+    image: gotify/server:latest
+    restart: unless-stopped
+    ports:
+      - "8089:80"
+    volumes:
+      - ./data/gotify:/app/data

@@ -1,0 +1,15 @@
+#pragma once
+
+// Copy this file to firmware/include/laundry_config.h and edit the values before
+// upload. Do not commit laundry_config.h; it contains your Wi-Fi password and
+// relay secret.
+
+#define WIFI_SSID "your-wifi"
+#define WIFI_PASSWORD "your-password"
+
+#define DEVICE_ID "laundry-stack-1"
+#define FIRMWARE_VERSION "0.1.0"
+
+// Use optiplex-lan's router-reserved static IP, not the SSH alias.
+#define RELAY_URL "http://192.168.1.50:8088/api/v1/events"
+#define DEVICE_SECRET "replace-with-a-long-random-secret"

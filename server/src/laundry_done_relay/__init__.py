@@ -1,0 +1,1 @@
+"""Laundry Done relay service."""
