@@ -1,4 +1,5 @@
 import importlib
+import sys
 
 
 def test_env_app_imports_after_required_environment_is_set(monkeypatch, tmp_path):
@@ -8,8 +9,8 @@ def test_env_app_imports_after_required_environment_is_set(monkeypatch, tmp_path
     monkeypatch.setenv("GOTIFY_URL", "http://gotify.local")
     monkeypatch.setenv("GOTIFY_APP_TOKEN", "token")
 
-    import laundry_done_relay.app as app_module
+    sys.modules.pop("laundry_done_relay.app", None)
 
-    reloaded = importlib.reload(app_module)
+    app_module = importlib.import_module("laundry_done_relay.app")
 
-    assert reloaded.app.title == "Laundry Done Relay"
+    assert app_module.app.title == "Laundry Done Relay"

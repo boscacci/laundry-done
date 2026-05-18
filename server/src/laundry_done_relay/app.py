@@ -85,9 +85,6 @@ def _required_env(name: str) -> str:
     return value
 
 
-app = app_from_env() if os.environ.get("LAUNDRY_RELAY_FROM_ENV") == "1" else FastAPI()
-
-
 def _init_db(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(path) as conn:
@@ -160,3 +157,6 @@ def _gotify_sender(gotify_url: str, app_token: str) -> PushMessage:
         response.raise_for_status()
 
     return send
+
+
+app = app_from_env() if os.environ.get("LAUNDRY_RELAY_FROM_ENV") == "1" else FastAPI()
