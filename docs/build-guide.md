@@ -57,6 +57,7 @@ Edit:
 DEVICE_SECRET=<same long secret as firmware laundry_config.h>
 GOTIFY_URL=http://gotify:80
 GOTIFY_APP_TOKEN=<token from Gotify application settings>
+GOTIFY_DEFAULTUSER_PASS=<long random Gotify admin password>
 ```
 
 Start services:
