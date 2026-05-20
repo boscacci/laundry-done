@@ -61,7 +61,7 @@ def create_app(
 
         event = LaundryEvent.model_validate_json(body)
         duplicate = _store_event(db_path, event, body)
-        if not duplicate and event.state == "done_sent":
+        if not duplicate and event.state in {"done_sent", "button_pressed"}:
             sender(_message_for(event).model_dump())
 
         return {"accepted": True, "duplicate": duplicate}
@@ -140,6 +140,11 @@ def _valid_signature(secret: str, body: bytes, received: str) -> bool:
 
 
 def _message_for(event: LaundryEvent) -> GotifyMessage:
+    if event.state == "button_pressed":
+        return GotifyMessage(
+            title="Laundry button pressed",
+            message="ESP32 button test reached the relay.",
+        )
     if event.cycle_label == "washer":
         return GotifyMessage(title="Washer done", message="No washer motion for 10 min.")
     if event.cycle_label == "dryer":

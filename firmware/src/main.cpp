@@ -22,6 +22,7 @@
 #endif
 
 namespace {
+constexpr uint8_t kLedPin = 2;
 constexpr uint8_t kSdaPin = 21;
 constexpr uint8_t kSclPin = 22;
 constexpr unsigned long kSampleWindowMs = 4000;
@@ -151,9 +152,79 @@ bool post_done_event(const Decision &decision, const MotionWindow &window) {
 }
 } // namespace
 
+#if LAUNDRY_BUTTON_TEST
+
+namespace {
+constexpr uint8_t kButtonPin = 0;
+constexpr unsigned long kDebounceMs = 300;
+unsigned long last_button_ms = 0;
+uint32_t button_counter = 0;
+
+bool post_button_event() {
+  if (!connect_wifi()) {
+    Serial.println("button_post wifi_failed=true");
+    WiFi.disconnect(true);
+    WiFi.mode(WIFI_OFF);
+    return false;
+  }
+
+  JsonDocument doc;
+  const String event_id = String("button-") + String(button_counter) + "-" + String(millis());
+  doc["device_id"] = DEVICE_ID;
+  doc["event_id"] = event_id;
+  doc["cycle_id"] = "manual-button-test";
+  doc["state"] = "button_pressed";
+  doc["cycle_label"] = "unknown";
+  doc["motion_rms_mg"] = 0.0;
+  doc["last_motion_ms"] = 0;
+  doc["firmware_version"] = FIRMWARE_VERSION;
+
+  String body;
+  serializeJson(doc, body);
+
+  HTTPClient http;
+  http.begin(RELAY_URL);
+  http.addHeader("content-type", "application/json");
+  http.addHeader("x-laundry-signature", hmac_sha256(body));
+  const int status = http.POST(body);
+  Serial.printf("button_post status=%d event_id=%s\n", status, event_id.c_str());
+  http.end();
+  WiFi.disconnect(true);
+  WiFi.mode(WIFI_OFF);
+  return status >= 200 && status < 300;
+}
+} // namespace
+
 void setup() {
   Serial.begin(115200);
   delay(1000);
+  pinMode(kLedPin, OUTPUT);
+  pinMode(kButtonPin, INPUT_PULLUP);
+  digitalWrite(kLedPin, LOW);
+  WiFi.mode(WIFI_OFF);
+  Serial.println("button_test_ready=true button_pin=0");
+}
+
+void loop() {
+  const bool pressed = digitalRead(kButtonPin) == LOW;
+  if (pressed && millis() - last_button_ms > kDebounceMs) {
+    last_button_ms = millis();
+    button_counter++;
+    digitalWrite(kLedPin, HIGH);
+    const bool ok = post_button_event();
+    Serial.printf("button_result ok=%s\n", ok ? "true" : "false");
+    delay(ok ? 1000 : 200);
+    digitalWrite(kLedPin, LOW);
+  }
+  delay(20);
+}
+
+#else
+
+void setup() {
+  Serial.begin(115200);
+  delay(1000);
+  pinMode(kLedPin, OUTPUT);
   Wire.begin(kSdaPin, kSclPin);
 
   if (!lis.begin(0x18) && !lis.begin(0x19)) {
@@ -190,3 +261,5 @@ void loop() {
           : kRunningPollMs;
   delay(nap_ms);
 }
+
+#endif
