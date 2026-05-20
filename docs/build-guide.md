@@ -4,18 +4,47 @@
 
 Start on the desk before anything goes near the appliance.
 
-| LIS3DH | ESP32 DevKit |
+| LSM6DS3 or LIS3DH | ESP32 DevKit |
 | --- | --- |
-| `VIN` or `3V` | `3V3` |
+| `VIN`, `VCC`, or `3V` | `3V3` |
 | `GND` | `GND` |
 | `SDA` | GPIO `21` |
 | `SCL` | GPIO `22` |
-| `INT1` | GPIO `33` optional, reserved for later wake work |
+| `INT1`, if present | GPIO `33` optional, reserved for later wake work |
 
 Use Dupont wires first. After the firmware sees the sensor, solder the four
 required wires and cover joints with heat-shrink.
 
-## 2. Configure Firmware
+## 2. Bench-Test The Accelerometer
+
+If the sensor is wired correctly, the ESP32 can scan I2C before any Wi-Fi setup:
+
+```bash
+pio run -e i2c_scan -t upload --upload-port /dev/cu.usbserial-8
+pio device monitor --port /dev/cu.usbserial-8 --baud 115200
+```
+
+A GODIYMODULES LSM6DS3 breakout normally appears at `0x6B` with register `0x0F`
+equal to `0x69`.
+
+Then upload the LED motion test:
+
+```bash
+pio run -e accel_led_test -t upload --upload-port /dev/cu.usbserial-8
+pio device monitor --port /dev/cu.usbserial-8 --baud 115200
+```
+
+Expected startup log:
+
+```text
+sensor_type=LSM6DS3
+accel_led_test_ready=true sensor_detected=true
+```
+
+At rest, `delta_mg` should settle near single digits and `led=4`. Tapping or
+tilting the board should spike `delta_mg` and brighten the onboard LED.
+
+## 3. Configure Firmware
 
 Copy the local config template:
 
@@ -40,10 +69,11 @@ pio device monitor -b 115200
 Expected startup log:
 
 ```text
+sensor_type=LSM6DS3
 sensor_detected=true
 ```
 
-## 3. Deploy The Relay On optiplex-lan
+## 4. Deploy The Relay On optiplex-lan
 
 Copy the repo to the server, then create `.env`:
 
@@ -84,7 +114,7 @@ Health check:
 curl http://<optiplex-lan-static-ip>:8088/healthz
 ```
 
-## 4. Log In From Android
+## 5. Log In From Android
 
 Install the Gotify Android app from Google Play or F-Droid.
 
@@ -110,7 +140,7 @@ cd ~/repos/laundry-done
 awk -F= '/^GOTIFY_DEFAULTUSER_PASS=/{print $2}' .env
 ```
 
-## 5. Mount The Puck
+## 6. Mount The Puck
 
 Your photos show a stacked GE washer/dryer with a shared cabinet. Use one sensor
 puck for v1.
@@ -135,7 +165,7 @@ Recommended physical build:
    the enclosure pressed flat.
 4. Add hot glue or heat-shrink as strain relief where the USB cable enters.
 
-## 6. Calibrate With Real Cycles
+## 7. Calibrate With Real Cycles
 
 Open serial monitor during one washer run and one dryer run:
 
@@ -161,7 +191,7 @@ Only tune after observing real logs. If the dryer never crosses active motion,
 lower `active_threshold_mg` in `DetectorConfig`. If foot traffic or door bumps
 start cycles, raise it slightly or mount the puck lower on the appliance body.
 
-## 7. Expected Alerts
+## 8. Expected Alerts
 
 Normal sequence:
 

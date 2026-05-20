@@ -11,7 +11,7 @@ server.
 
 ## What It Does
 
-- Detects laundry motion with an LIS3DH accelerometer.
+- Detects laundry motion with an LSM6DS3 or LIS3DH accelerometer.
 - Runs the washer/dryer decision locally on the ESP32.
 - Sends only finished-cycle events over Wi-Fi.
 - Relays events through a FastAPI service on `optiplex-lan`.
@@ -22,7 +22,7 @@ server.
 
 ```mermaid
 flowchart LR
-  A["Stacked washer/dryer vibration"] --> B["LIS3DH accelerometer"]
+  A["Stacked washer/dryer vibration"] --> B["LSM6DS3 or LIS3DH accelerometer"]
   B --> C["ESP32 detector state machine"]
   C -->|"signed HTTP event"| D["FastAPI relay on optiplex-lan"]
   D --> E["Gotify server"]
@@ -84,6 +84,13 @@ Build the ESP32 firmware:
 pio run -e esp32dev
 ```
 
+Bench-test an attached accelerometer by mapping motion to the onboard LED:
+
+```bash
+pio run -e accel_led_test -t upload --upload-port /dev/cu.usbserial-8
+pio device monitor --port /dev/cu.usbserial-8 --baud 115200
+```
+
 ## Safety
 
 Do not open the appliance, modify dryer wiring, or touch the 240V/220V outlet.
@@ -93,6 +100,7 @@ and any hot or moving parts.
 
 ## References
 
+- [Adafruit LSM6DS guide](https://learn.adafruit.com/lsm6ds3tr-c-6-dof-accel-gyro-imu)
 - [Adafruit LIS3DH guide](https://learn.adafruit.com/adafruit-lis3dh-triple-axis-accelerometer-breakout)
 - [Espressif Arduino ESP32 sleep API](https://docs.espressif.com/projects/arduino-esp32/en/latest/api/deepsleep.html)
 - [Gotify install docs](https://gotify.net/docs/install)

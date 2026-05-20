@@ -6,6 +6,9 @@
 #include <mbedtls/md.h>
 
 #include <Adafruit_LIS3DH.h>
+#include <Adafruit_LSM6DS3.h>
+#include <Adafruit_LSM6DS3TRC.h>
+#include <Adafruit_LSM6DSOX.h>
 #include <Adafruit_Sensor.h>
 
 #include "laundry_detector.h"
@@ -30,10 +33,22 @@ constexpr unsigned long kIdlePollMs = 60000;
 constexpr unsigned long kRunningPollMs = 20000;
 
 Adafruit_LIS3DH lis = Adafruit_LIS3DH();
+Adafruit_LSM6DS3 lsm6ds3 = Adafruit_LSM6DS3();
+Adafruit_LSM6DS3TRC lsm6ds3trc = Adafruit_LSM6DS3TRC();
+Adafruit_LSM6DSOX lsm6dsox = Adafruit_LSM6DSOX();
 LaundryDetector detector;
 uint32_t cycle_counter = 0;
 unsigned long last_motion_ms = 0;
 CycleLabel last_posted_label = CycleLabel::Unknown;
+
+enum class MotionSensor {
+  None,
+  Lis3dh,
+  Lsm6ds3,
+  Lsm6ds3trc,
+  Lsm6dsox,
+};
+MotionSensor motion_sensor = MotionSensor::None;
 
 const char *label_to_string(CycleLabel label) {
   switch (label) {
@@ -46,6 +61,73 @@ const char *label_to_string(CycleLabel label) {
   case CycleLabel::Unknown:
   default:
     return "unknown";
+  }
+}
+
+const char *motion_sensor_to_string(MotionSensor sensor) {
+  switch (sensor) {
+  case MotionSensor::Lis3dh:
+    return "LIS3DH";
+  case MotionSensor::Lsm6ds3:
+    return "LSM6DS3";
+  case MotionSensor::Lsm6ds3trc:
+    return "LSM6DS3TRC";
+  case MotionSensor::Lsm6dsox:
+    return "LSM6DSOX";
+  case MotionSensor::None:
+  default:
+    return "none";
+  }
+}
+
+bool setup_motion_sensor() {
+  Wire.begin(kSdaPin, kSclPin);
+  if (lis.begin(0x18) || lis.begin(0x19)) {
+    lis.setRange(LIS3DH_RANGE_2_G);
+    lis.setDataRate(LIS3DH_DATARATE_25_HZ);
+    motion_sensor = MotionSensor::Lis3dh;
+    return true;
+  }
+  if (lsm6ds3.begin_I2C(0x6B) || lsm6ds3.begin_I2C(0x6A)) {
+    lsm6ds3.setAccelRange(LSM6DS_ACCEL_RANGE_2_G);
+    lsm6ds3.setAccelDataRate(LSM6DS_RATE_26_HZ);
+    motion_sensor = MotionSensor::Lsm6ds3;
+    return true;
+  }
+  if (lsm6ds3trc.begin_I2C(0x6B) || lsm6ds3trc.begin_I2C(0x6A)) {
+    lsm6ds3trc.setAccelRange(LSM6DS_ACCEL_RANGE_2_G);
+    lsm6ds3trc.setAccelDataRate(LSM6DS_RATE_26_HZ);
+    motion_sensor = MotionSensor::Lsm6ds3trc;
+    return true;
+  }
+  if (lsm6dsox.begin_I2C(0x6B) || lsm6dsox.begin_I2C(0x6A)) {
+    lsm6dsox.setAccelRange(LSM6DS_ACCEL_RANGE_2_G);
+    lsm6dsox.setAccelDataRate(LSM6DS_RATE_26_HZ);
+    motion_sensor = MotionSensor::Lsm6dsox;
+    return true;
+  }
+  return false;
+}
+
+bool read_motion_event(sensors_event_t *event) {
+  sensors_event_t gyro_event;
+  sensors_event_t temp_event;
+  switch (motion_sensor) {
+  case MotionSensor::Lis3dh:
+    lis.getEvent(event);
+    return true;
+  case MotionSensor::Lsm6ds3:
+    lsm6ds3.getEvent(event, &gyro_event, &temp_event);
+    return true;
+  case MotionSensor::Lsm6ds3trc:
+    lsm6ds3trc.getEvent(event, &gyro_event, &temp_event);
+    return true;
+  case MotionSensor::Lsm6dsox:
+    lsm6dsox.getEvent(event, &gyro_event, &temp_event);
+    return true;
+  case MotionSensor::None:
+  default:
+    return false;
   }
 }
 
@@ -74,7 +156,9 @@ String hmac_sha256(const String &body) {
 
 MotionWindow sample_motion_window() {
   sensors_event_t previous;
-  lis.getEvent(&previous);
+  if (!read_motion_event(&previous)) {
+    return MotionWindow{millis(), 0, 0.0f, 0.0f};
+  }
 
   const unsigned long start = millis();
   float sum_sq = 0.0f;
@@ -83,7 +167,9 @@ MotionWindow sample_motion_window() {
 
   while (millis() - start < kSampleWindowMs) {
     sensors_event_t current;
-    lis.getEvent(&current);
+    if (!read_motion_event(&current)) {
+      break;
+    }
     const float dx = current.acceleration.x - previous.acceleration.x;
     const float dy = current.acceleration.y - previous.acceleration.y;
     const float dz = current.acceleration.z - previous.acceleration.z;
@@ -152,7 +238,120 @@ bool post_done_event(const Decision &decision, const MotionWindow &window) {
 }
 } // namespace
 
-#if LAUNDRY_BUTTON_TEST
+#if LAUNDRY_I2C_SCAN
+
+void setup() {
+  Serial.begin(115200);
+  delay(1000);
+  pinMode(kLedPin, OUTPUT);
+  Wire.begin(kSdaPin, kSclPin);
+  WiFi.mode(WIFI_OFF);
+  Serial.println("i2c_scan_ready=true sda=21 scl=22");
+}
+
+void loop() {
+  uint8_t found = 0;
+  for (uint8_t address = 1; address < 127; address++) {
+    Wire.beginTransmission(address);
+    const uint8_t error = Wire.endTransmission();
+    if (error == 0) {
+      Serial.printf("i2c_found address=0x%02X\n", address);
+      for (uint8_t reg : {0x00, 0x0D, 0x0F, 0x75}) {
+        Wire.beginTransmission(address);
+        Wire.write(reg);
+        if (Wire.endTransmission(false) == 0 && Wire.requestFrom(address, static_cast<uint8_t>(1)) == 1) {
+          Serial.printf("i2c_reg address=0x%02X reg=0x%02X value=0x%02X\n",
+                        address,
+                        reg,
+                        Wire.read());
+        }
+      }
+      found++;
+    }
+  }
+  Serial.printf("i2c_scan_done found=%u\n", found);
+  digitalWrite(kLedPin, found > 0 ? HIGH : LOW);
+  delay(2000);
+}
+
+#elif LAUNDRY_ACCEL_LED_TEST
+
+namespace {
+constexpr uint8_t kPwmChannel = 0;
+constexpr uint16_t kPwmFrequency = 5000;
+constexpr uint8_t kPwmResolutionBits = 8;
+
+float previous_x = 0.0f;
+float previous_y = 0.0f;
+float previous_z = 0.0f;
+bool have_previous = false;
+
+uint8_t brightness_for_motion(float delta_mg) {
+  if (delta_mg < 8.0f) {
+    return 4;
+  }
+  if (delta_mg > 220.0f) {
+    return 255;
+  }
+  return static_cast<uint8_t>(4.0f + ((delta_mg - 8.0f) * (251.0f / 212.0f)));
+}
+} // namespace
+
+void setup() {
+  Serial.begin(115200);
+  delay(1000);
+  ledcSetup(kPwmChannel, kPwmFrequency, kPwmResolutionBits);
+  ledcAttachPin(kLedPin, kPwmChannel);
+  ledcWrite(kPwmChannel, 4);
+  WiFi.mode(WIFI_OFF);
+
+  if (!setup_motion_sensor()) {
+    Serial.println("accel_led_test_ready=false sensor_detected=false");
+    while (true) {
+      ledcWrite(kPwmChannel, 255);
+      delay(100);
+      ledcWrite(kPwmChannel, 0);
+      delay(100);
+    }
+  }
+
+  Serial.printf("sensor_type=%s\n", motion_sensor_to_string(motion_sensor));
+  Serial.println("accel_led_test_ready=true sensor_detected=true");
+}
+
+void loop() {
+  sensors_event_t event;
+  if (!read_motion_event(&event)) {
+    Serial.println("accel_read_error=no_sensor");
+    delay(1000);
+    return;
+  }
+
+  float delta_mg = 0.0f;
+  if (have_previous) {
+    const float dx = event.acceleration.x - previous_x;
+    const float dy = event.acceleration.y - previous_y;
+    const float dz = event.acceleration.z - previous_z;
+    delta_mg = (sqrtf((dx * dx) + (dy * dy) + (dz * dz)) / 9.80665f) * 1000.0f;
+  }
+
+  previous_x = event.acceleration.x;
+  previous_y = event.acceleration.y;
+  previous_z = event.acceleration.z;
+  have_previous = true;
+
+  const uint8_t brightness = brightness_for_motion(delta_mg);
+  ledcWrite(kPwmChannel, brightness);
+  Serial.printf("accel x=%.3f y=%.3f z=%.3f delta_mg=%.1f led=%u\n",
+                event.acceleration.x,
+                event.acceleration.y,
+                event.acceleration.z,
+                delta_mg,
+                brightness);
+  delay(100);
+}
+
+#elif LAUNDRY_BUTTON_TEST
 
 namespace {
 constexpr uint8_t kButtonPin = 0;
@@ -225,18 +424,16 @@ void setup() {
   Serial.begin(115200);
   delay(1000);
   pinMode(kLedPin, OUTPUT);
-  Wire.begin(kSdaPin, kSclPin);
 
-  if (!lis.begin(0x18) && !lis.begin(0x19)) {
+  if (!setup_motion_sensor()) {
     Serial.println("sensor_detected=false");
     while (true) {
       delay(1000);
     }
   }
 
-  lis.setRange(LIS3DH_RANGE_2_G);
-  lis.setDataRate(LIS3DH_DATARATE_25_HZ);
   WiFi.mode(WIFI_OFF);
+  Serial.printf("sensor_type=%s\n", motion_sensor_to_string(motion_sensor));
   Serial.println("sensor_detected=true");
 }
 

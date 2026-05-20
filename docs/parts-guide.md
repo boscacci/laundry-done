@@ -11,7 +11,8 @@ instead of chasing one exact seller.
 
 | Part | What To Search | Notes |
 | --- | --- | --- |
-| LIS3DH accelerometer breakout | [Amazon: LIS3DH accelerometer breakout I2C](https://www.amazon.com/s?k=LIS3DH+accelerometer+breakout+I2C) | Get a breakout with pins you can solder. Qwiic/STEMMA QT is fine, but plain header holes are easiest. |
+| LSM6DS3 accelerometer/gyro breakout | [Amazon: LSM6DS3 accelerometer gyroscope I2C breakout](https://www.amazon.com/s?k=LSM6DS3+accelerometer+gyroscope+I2C+breakout) | This matches the GODIYMODULES purple board used in the current build. Plain header holes are easiest. |
+| LIS3DH accelerometer breakout | [Amazon: LIS3DH accelerometer breakout I2C](https://www.amazon.com/s?k=LIS3DH+accelerometer+breakout+I2C) | Also supported. Choose this if LSM6DS3 listings are unavailable or overpriced. |
 | Female-to-female Dupont jumpers | [Amazon: female female dupont jumper wires](https://www.amazon.com/s?k=female+female+dupont+jumper+wires) | Useful for the first bench test before soldering. |
 | Short USB cable | [Amazon: 6 inch USB cable right angle](https://www.amazon.com/s?k=6+inch+usb+c+right+angle+cable) | Match your power bank output and ESP32 input. Short and strain-relieved is better than fancy. |
 | Small project enclosure | [Amazon: small plastic electronics project box](https://www.amazon.com/s?k=small+plastic+electronics+project+box) | Optional but nicer than hot-gluing bare boards. Pick one just big enough for the ESP32 and accelerometer. |
@@ -35,11 +36,11 @@ instead of chasing one exact seller.
 
 ## Budget Notes
 
-- Required new part: LIS3DH breakout.
+- Required new part: one supported I2C accelerometer breakout, preferably the
+  LSM6DS3 board already tested in this build.
 - Likely useful consumables: heat-shrink and short jumpers.
 - Reuse: ESP32, USB power bank, existing magnets, soldering iron, hot glue.
 
-If the Amazon LIS3DH options are overpriced, buy the accelerometer from Adafruit
-or Digi-Key and get the generic supplies from Amazon. Adafruit's LIS3DH guide is
-the reference this firmware is built around:
-[Adafruit LIS3DH](https://learn.adafruit.com/adafruit-lis3dh-triple-axis-accelerometer-breakout).
+If Amazon sensor options are overpriced, buy the accelerometer from Adafruit or
+Digi-Key and get the generic supplies from Amazon. The firmware supports both
+LSM6DS3-family boards and LIS3DH boards.
