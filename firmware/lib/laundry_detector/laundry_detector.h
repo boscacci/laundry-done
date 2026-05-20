@@ -42,6 +42,27 @@ struct Decision {
   bool should_post = false;
 };
 
+struct MovementTriggerConfig {
+  float threshold_mg = 30.0f;
+  unsigned long confirm_motion_ms = 3000UL;
+  unsigned long cooldown_ms = 60000UL;
+};
+
+class MovementTrigger {
+public:
+  explicit MovementTrigger(const MovementTriggerConfig &config = MovementTriggerConfig());
+
+  bool observe(unsigned long at_ms, float motion_mg);
+  void reset();
+
+private:
+  MovementTriggerConfig config_;
+  bool active_ = false;
+  unsigned long active_started_ms_ = 0;
+  unsigned long last_post_ms_ = 0;
+  bool posted_once_ = false;
+};
+
 class LaundryDetector {
 public:
   explicit LaundryDetector(const DetectorConfig &config = DetectorConfig());

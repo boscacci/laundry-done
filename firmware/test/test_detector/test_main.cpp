@@ -89,11 +89,54 @@ void test_short_bump_is_ignored() {
   TEST_ASSERT_FALSE(quiet_again.should_post);
 }
 
+void test_motion_trigger_posts_after_three_seconds_of_continuous_motion() {
+  MovementTrigger trigger(MovementTriggerConfig{
+      .threshold_mg = 30.0f,
+      .confirm_motion_ms = 3000UL,
+      .cooldown_ms = 60000UL,
+  });
+
+  TEST_ASSERT_FALSE(trigger.observe(0, 45.0f));
+  TEST_ASSERT_FALSE(trigger.observe(2999UL, 48.0f));
+  TEST_ASSERT_TRUE(trigger.observe(3000UL, 51.0f));
+}
+
+void test_motion_trigger_resets_when_motion_drops_before_confirmation() {
+  MovementTrigger trigger(MovementTriggerConfig{
+      .threshold_mg = 30.0f,
+      .confirm_motion_ms = 3000UL,
+      .cooldown_ms = 60000UL,
+  });
+
+  TEST_ASSERT_FALSE(trigger.observe(0, 45.0f));
+  TEST_ASSERT_FALSE(trigger.observe(2000UL, 12.0f));
+  TEST_ASSERT_FALSE(trigger.observe(4000UL, 45.0f));
+  TEST_ASSERT_FALSE(trigger.observe(6999UL, 45.0f));
+  TEST_ASSERT_TRUE(trigger.observe(7000UL, 45.0f));
+}
+
+void test_motion_trigger_enforces_cooldown_after_posting() {
+  MovementTrigger trigger(MovementTriggerConfig{
+      .threshold_mg = 30.0f,
+      .confirm_motion_ms = 3000UL,
+      .cooldown_ms = 60000UL,
+  });
+
+  TEST_ASSERT_FALSE(trigger.observe(0, 45.0f));
+  TEST_ASSERT_TRUE(trigger.observe(3000UL, 45.0f));
+  TEST_ASSERT_FALSE(trigger.observe(4000UL, 45.0f));
+  TEST_ASSERT_FALSE(trigger.observe(62000UL, 45.0f));
+  TEST_ASSERT_TRUE(trigger.observe(63000UL, 45.0f));
+}
+
 int main(int argc, char **argv) {
   UNITY_BEGIN();
   RUN_TEST(test_washer_cycle_alerts_once_after_quiet_period);
   RUN_TEST(test_dryer_after_washer_is_labeled_dryer);
   RUN_TEST(test_ambiguous_tandem_motion_gets_stack_label);
   RUN_TEST(test_short_bump_is_ignored);
+  RUN_TEST(test_motion_trigger_posts_after_three_seconds_of_continuous_motion);
+  RUN_TEST(test_motion_trigger_resets_when_motion_drops_before_confirmation);
+  RUN_TEST(test_motion_trigger_enforces_cooldown_after_posting);
   return UNITY_END();
 }

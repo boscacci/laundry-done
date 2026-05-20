@@ -1,5 +1,39 @@
 #include "laundry_detector.h"
 
+MovementTrigger::MovementTrigger(const MovementTriggerConfig &config) : config_(config) {}
+
+bool MovementTrigger::observe(unsigned long at_ms, float motion_mg) {
+  if (motion_mg < config_.threshold_mg) {
+    active_ = false;
+    active_started_ms_ = 0;
+    return false;
+  }
+
+  if (!active_) {
+    active_ = true;
+    active_started_ms_ = at_ms;
+  }
+
+  if (at_ms - active_started_ms_ < config_.confirm_motion_ms) {
+    return false;
+  }
+
+  if (posted_once_ && at_ms - last_post_ms_ < config_.cooldown_ms) {
+    return false;
+  }
+
+  posted_once_ = true;
+  last_post_ms_ = at_ms;
+  return true;
+}
+
+void MovementTrigger::reset() {
+  active_ = false;
+  active_started_ms_ = 0;
+  last_post_ms_ = 0;
+  posted_once_ = false;
+}
+
 LaundryDetector::LaundryDetector(const DetectorConfig &config) : config_(config) {}
 
 Decision LaundryDetector::observe(const MotionWindow &window) {

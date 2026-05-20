@@ -154,3 +154,38 @@ def test_button_pressed_event_sends_phone_test_alert(tmp_path):
             "priority": 5,
         }
     ]
+
+
+def test_motion_started_event_sends_phone_test_alert(tmp_path):
+    sent = []
+    app = create_app(
+        database_path=tmp_path / "events.sqlite3",
+        device_secret="test-secret",
+        gotify_url="http://gotify.local",
+        gotify_app_token="token",
+        push_message=lambda message: sent.append(message),
+    )
+
+    response = _post(
+        TestClient(app),
+        "test-secret",
+        {
+            "device_id": "laundry-stack-1",
+            "event_id": "motion-evt-1",
+            "cycle_id": "motion-request-test",
+            "state": "motion_started",
+            "cycle_label": "unknown",
+            "motion_rms_mg": 51.0,
+            "last_motion_ms": 0,
+            "firmware_version": "motion-request-test",
+        },
+    )
+
+    assert response.status_code == 202
+    assert sent == [
+        {
+            "title": "Laundry motion detected",
+            "message": "ESP32 saw continuous movement for 3 seconds.",
+            "priority": 5,
+        }
+    ]

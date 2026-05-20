@@ -236,6 +236,43 @@ bool post_done_event(const Decision &decision, const MotionWindow &window) {
   WiFi.mode(WIFI_OFF);
   return status >= 200 && status < 300;
 }
+
+bool post_motion_started_event(uint32_t event_counter, float motion_mg) {
+  if (!connect_wifi()) {
+    Serial.println("motion_post wifi_failed=true");
+    WiFi.disconnect(true);
+    WiFi.mode(WIFI_OFF);
+    return false;
+  }
+
+  JsonDocument doc;
+  const String event_id = String("motion-") + String(event_counter) + "-" + String(millis());
+  doc["device_id"] = DEVICE_ID;
+  doc["event_id"] = event_id;
+  doc["cycle_id"] = "motion-request-test";
+  doc["state"] = "motion_started";
+  doc["cycle_label"] = "unknown";
+  doc["motion_rms_mg"] = motion_mg;
+  doc["last_motion_ms"] = 0;
+  doc["firmware_version"] = FIRMWARE_VERSION;
+
+  String body;
+  serializeJson(doc, body);
+
+  HTTPClient http;
+  http.begin(RELAY_URL);
+  http.addHeader("content-type", "application/json");
+  http.addHeader("x-laundry-signature", hmac_sha256(body));
+  const int status = http.POST(body);
+  Serial.printf("motion_post status=%d event_id=%s motion_mg=%.1f\n",
+                status,
+                event_id.c_str(),
+                motion_mg);
+  http.end();
+  WiFi.disconnect(true);
+  WiFi.mode(WIFI_OFF);
+  return status >= 200 && status < 300;
+}
 } // namespace
 
 #if LAUNDRY_I2C_SCAN
@@ -348,6 +385,80 @@ void loop() {
                 event.acceleration.z,
                 delta_mg,
                 brightness);
+  delay(100);
+}
+
+#elif LAUNDRY_MOTION_REQUEST_TEST
+
+namespace {
+MovementTrigger motion_request_trigger;
+uint32_t motion_request_counter = 0;
+float previous_x = 0.0f;
+float previous_y = 0.0f;
+float previous_z = 0.0f;
+bool have_previous = false;
+
+float read_delta_mg() {
+  sensors_event_t event;
+  if (!read_motion_event(&event)) {
+    return 0.0f;
+  }
+
+  float delta_mg = 0.0f;
+  if (have_previous) {
+    const float dx = event.acceleration.x - previous_x;
+    const float dy = event.acceleration.y - previous_y;
+    const float dz = event.acceleration.z - previous_z;
+    delta_mg = (sqrtf((dx * dx) + (dy * dy) + (dz * dz)) / 9.80665f) * 1000.0f;
+  }
+
+  previous_x = event.acceleration.x;
+  previous_y = event.acceleration.y;
+  previous_z = event.acceleration.z;
+  have_previous = true;
+  return delta_mg;
+}
+} // namespace
+
+void setup() {
+  Serial.begin(115200);
+  delay(1000);
+  pinMode(kLedPin, OUTPUT);
+  digitalWrite(kLedPin, LOW);
+  WiFi.mode(WIFI_OFF);
+
+  if (!setup_motion_sensor()) {
+    Serial.println("motion_request_test_ready=false sensor_detected=false");
+    while (true) {
+      digitalWrite(kLedPin, HIGH);
+      delay(100);
+      digitalWrite(kLedPin, LOW);
+      delay(100);
+    }
+  }
+
+  Serial.printf("sensor_type=%s\n", motion_sensor_to_string(motion_sensor));
+  Serial.println("motion_request_test_ready=true threshold_mg=30 confirm_ms=3000 cooldown_ms=60000");
+}
+
+void loop() {
+  const float delta_mg = read_delta_mg();
+  const bool should_post = motion_request_trigger.observe(millis(), delta_mg);
+  digitalWrite(kLedPin, delta_mg >= 30.0f ? HIGH : LOW);
+  Serial.printf("motion_sample delta_mg=%.1f active=%s should_post=%s\n",
+                delta_mg,
+                delta_mg >= 30.0f ? "true" : "false",
+                should_post ? "true" : "false");
+
+  if (should_post) {
+    motion_request_counter++;
+    digitalWrite(kLedPin, HIGH);
+    const bool ok = post_motion_started_event(motion_request_counter, delta_mg);
+    Serial.printf("motion_result ok=%s\n", ok ? "true" : "false");
+    digitalWrite(kLedPin, ok ? HIGH : LOW);
+    delay(ok ? 1000 : 200);
+  }
+
   delay(100);
 }
 

@@ -44,6 +44,17 @@ accel_led_test_ready=true sensor_detected=true
 At rest, `delta_mg` should settle near single digits and `led=4`. Tapping or
 tilting the board should spike `delta_mg` and brighten the onboard LED.
 
+To test Wi-Fi and relay notifications from accelerometer motion, upload the
+motion request test:
+
+```bash
+pio run -e motion_request_test -t upload --upload-port /dev/cu.usbserial-8
+pio device monitor --port /dev/cu.usbserial-8 --baud 115200
+```
+
+Move the board continuously for more than 3 seconds. The sketch posts a signed
+`motion_started` event and then waits 60 seconds before it can post again.
+
 ## 3. Configure Firmware
 
 Copy the local config template:

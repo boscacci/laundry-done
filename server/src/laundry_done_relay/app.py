@@ -61,7 +61,7 @@ def create_app(
 
         event = LaundryEvent.model_validate_json(body)
         duplicate = _store_event(db_path, event, body)
-        if not duplicate and event.state in {"done_sent", "button_pressed"}:
+        if not duplicate and event.state in {"done_sent", "button_pressed", "motion_started"}:
             sender(_message_for(event).model_dump())
 
         return {"accepted": True, "duplicate": duplicate}
@@ -144,6 +144,11 @@ def _message_for(event: LaundryEvent) -> GotifyMessage:
         return GotifyMessage(
             title="Laundry button pressed",
             message="ESP32 button test reached the relay.",
+        )
+    if event.state == "motion_started":
+        return GotifyMessage(
+            title="Laundry motion detected",
+            message="ESP32 saw continuous movement for 3 seconds.",
         )
     if event.cycle_label == "washer":
         return GotifyMessage(title="Washer done", message="No washer motion for 10 min.")
