@@ -52,8 +52,40 @@ pio run -e motion_request_test -t upload --upload-port /dev/cu.usbserial-8
 pio device monitor --port /dev/cu.usbserial-8 --baud 115200
 ```
 
-Move the board continuously for more than 3 seconds. The sketch posts a signed
-`motion_started` event and then waits 60 seconds before it can post again.
+Move the board for about 300 ms. The sketch keeps Wi-Fi connected, posts a signed
+`motion_started` event, and then waits 5 seconds before it can post again.
+
+To capture real washer/dryer data for tuning, upload the calibration firmware:
+
+```bash
+pio run -e calibration_capture -t upload --upload-port /dev/cu.usbserial-8
+pio device monitor --port /dev/cu.usbserial-8 --baud 115200
+```
+
+The calibration firmware posts one signed `calibration_sample` event per
+4-second motion window. These events do not send phone notifications. Fetch the
+latest samples from a Tailscale-connected device:
+
+```bash
+curl 'https://laundry.robertboscacci.com/api/v1/calibration/events?limit=200&days=14&max_peak_mg=300'
+```
+
+For a live graph, open:
+
+```text
+https://laundry.robertboscacci.com/monitor
+```
+
+The monitor polls every 2 seconds and plots vibration strength and biggest
+jolts from the calibration stream. The short version is: `mg = 1/1000 g`, RMS
+is typical shake, and peak is the largest single jolt in the same sample
+window. Background colors on the chart are time spans for the dashboard's best
+guess, not horizontal threshold lines. Relay data expires after 14 days; each
+write or dashboard read prunes older events from the local SQLite database.
+
+The dashboard URL uses HTTPS and is private to the tailnet. See
+[HTTPS Access Through Tailscale](https-access.md) for the Route53, Caddy, and
+Tailscale Serve setup.
 
 ## 3. Configure Firmware
 
@@ -67,8 +99,12 @@ Edit:
 
 - `WIFI_SSID`
 - `WIFI_PASSWORD`
-- `RELAY_URL`, using the static LAN IP for `optiplex-lan`
+- `RELAY_URL`, using the static LAN IP for your home server
 - `DEVICE_SECRET`, matching `.env`
+
+Smart Connect/shared 2.4 GHz + 5 GHz SSIDs are okay. The ESP32 can only join
+2.4 GHz, but it scans visible 2.4 GHz APs for the configured SSID and falls back
+to a generic SSID/password connect if the strongest scanned channel fails.
 
 Build and upload:
 
@@ -84,7 +120,7 @@ sensor_type=LSM6DS3
 sensor_detected=true
 ```
 
-## 4. Deploy The Relay On optiplex-lan
+## 4. Deploy The Relay On The Home Server
 
 Copy the repo to the server, then create `.env`:
 
@@ -110,7 +146,7 @@ docker compose up -d --build
 Open Gotify at:
 
 ```text
-http://<optiplex-lan-static-ip>:8089
+http://<home-server-lan-ip>:8089
 ```
 
 Create an application token in Gotify and paste it into `.env`, then restart:
@@ -122,7 +158,7 @@ docker compose restart relay
 Health check:
 
 ```bash
-curl http://<optiplex-lan-static-ip>:8088/healthz
+curl http://<home-server-lan-ip>:8088/healthz
 ```
 
 ## 5. Log In From Android
@@ -133,15 +169,16 @@ Use these settings:
 
 | Field | Value |
 | --- | --- |
-| Server URL on home Wi-Fi | `http://<optiplex-lan-static-ip>:8089` |
-| Server URL over Tailscale | `http://100.124.5.39:8089` |
+| Server URL on home Wi-Fi | `http://<home-server-lan-ip>:8089` |
+| Server URL over Tailscale HTTPS | `https://<home-server>.<tailnet>.ts.net:8443` |
+| Server URL over Tailscale IP fallback | `http://<home-server-tailscale-ip>:8089` |
 | Username | `admin` |
-| Password | The `GOTIFY_DEFAULTUSER_PASS` value in `~/repos/laundry-done/.env` on `optiplex-lan` |
+| Password | The `GOTIFY_DEFAULTUSER_PASS` value in `~/repos/laundry-done/.env` on your home server |
 
 To copy the password from your Mac without printing it:
 
 ```bash
-ssh optiplex-lan 'cd ~/repos/laundry-done && awk -F= "/^GOTIFY_DEFAULTUSER_PASS=/{print \$2}" .env' | pbcopy
+ssh <home-server> 'cd ~/repos/laundry-done && awk -F= "/^GOTIFY_DEFAULTUSER_PASS=/{print \$2}" .env' | pbcopy
 ```
 
 If you need to show it in a terminal on the server:
@@ -193,14 +230,43 @@ event_post status=202 label=washer
 
 Default thresholds:
 
-- Active: `30 mg`
-- Quiet: `12 mg`
+- Active: `3 mg`
+- Active peak: `8 mg`
+- Quiet: `1.5 mg`
 - Washer spin peak: `120 mg`
 - Done quiet period: `10 minutes`
 
-Only tune after observing real logs. If the dryer never crosses active motion,
-lower `active_threshold_mg` in `DetectorConfig`. If foot traffic or door bumps
-start cycles, raise it slightly or mount the puck lower on the appliance body.
+These thresholds came from the first bedding-wash calibration run, where real
+washer activity lived around `2-5 mg` RMS with `6-16 mg` peaks. A window counts
+as active when RMS crosses `3 mg` or peak crosses `8 mg`. If foot traffic or door
+bumps start cycles, raise `active_threshold_mg` / `active_peak_threshold_mg`
+slightly or mount the puck lower on the appliance body. If the machine finishes
+but never alerts, raise `quiet_threshold_mg` slightly after checking
+stopped-machine logs.
+
+The production firmware also posts dashboard telemetry as `calibration_sample`
+events. These samples feed `/monitor` but do not create Gotify phone
+notifications. Production firmware samples a 4-second motion window, then uses
+NTP to align the next sample to the next wall-clock 10-second boundary (`:00`,
+`:10`, `:20`, `:30`, `:40`, `:50`). It includes an NTP-backed
+`device_time_utc` field in telemetry payloads; the relay receive time remains as
+a fallback.
+
+The dashboard labels vibration in `mg`, which means milli-g: thousandths of
+Earth gravity. A reading of `300 mg` is `0.3 g`. The monitor hides samples whose
+peak jolt is above `300 mg` because those are usually handling bumps from moving
+or touching the sensor rather than washer/dryer rhythm. Classification happens
+on the relay, not on the ESP32: the sensor sends signed readings, and the relay
+uses smoothed recent readings to decide phase labels and Gotify alerts.
+
+By default the production firmware keeps light sleep disabled because some USB
+power banks shut off when the ESP32 draw drops too low. The controllable onboard
+LED stays off except for a tiny transmit blink. For manual battery-bank starts,
+the firmware keeps Wi-Fi connected and polls every few seconds for the first 15
+minutes after boot, which gives quiet washer fill/soak phases time to become
+real machine motion before the battery bank decides to shut down. The dashboard
+filters this handling noise before applying the visible sample limit, so a few
+large bumps do not empty the live chart.
 
 ## 8. Expected Alerts
 

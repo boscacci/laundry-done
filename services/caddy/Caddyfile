@@ -1,0 +1,11 @@
+{
+	email admin@robertboscacci.com
+}
+
+laundry.robertboscacci.com {
+	tls {
+		dns route53
+	}
+
+	reverse_proxy relay:8080
+}
