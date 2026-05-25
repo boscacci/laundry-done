@@ -1,20 +1,21 @@
 # Route53 Tailnet-Only Custom Domain
 
-This publishes the laundry monitor at:
+This publishes the private laundry tools at:
 
 ```text
 https://laundry.robertboscacci.com
+https://gotify.robertboscacci.com
 ```
 
-The DNS record intentionally points at the Optiplex Tailscale IPv4 address:
+The DNS records intentionally point at the Optiplex Tailscale IPv4 address:
 
 ```text
 100.124.5.39
 ```
 
 That address is only reachable from devices on the tailnet. TLS is terminated by
-the local Caddy reverse proxy in `compose.yaml`; Caddy obtains and renews the
-certificate with Route53 DNS-01 validation.
+the local Caddy reverse proxy in `compose.yaml`; Caddy obtains and renews
+certificates with Route53 DNS-01 validation.
 
 ## Apply
 

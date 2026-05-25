@@ -10,14 +10,20 @@ variable "zone_name" {
   default     = "robertboscacci.com"
 }
 
-variable "record_name" {
-  description = "Subdomain to publish inside the hosted zone."
+variable "laundry_record_name" {
+  description = "Laundry monitor subdomain to publish inside the hosted zone."
   type        = string
   default     = "laundry"
 }
 
+variable "gotify_record_name" {
+  description = "Gotify subdomain to publish inside the hosted zone."
+  type        = string
+  default     = "gotify"
+}
+
 variable "tailnet_ipv4" {
-  description = "Tailscale IPv4 address for the host serving the monitor."
+  description = "Tailscale IPv4 address for the host serving the private apps."
   type        = string
   default     = "100.124.5.39"
 }

@@ -6,6 +6,12 @@ The normal dashboard URL is:
 https://laundry.robertboscacci.com/monitor
 ```
 
+The stable Gotify mobile/server URL is:
+
+```text
+https://gotify.robertboscacci.com
+```
+
 That hostname is public DNS, but it points at the Optiplex Tailscale IPv4
 address (`100.124.5.39`). The address is not routable from the public internet,
 so the browser must be on the tailnet. Tailscale membership is the dashboard
@@ -17,7 +23,7 @@ authentication layer.
 | --- | --- | --- |
 | ESP32 to relay | `http://<home-server-lan-ip>:8088/api/v1/events` | Simple local HTTP, signed with HMAC. |
 | Browser dashboard | `https://laundry.robertboscacci.com/monitor` | Real HTTPS cert, reachable only from tailnet devices. |
-| Gotify app/UI | `https://optiplex.<tailnet>.ts.net:8443` or LAN fallback | Keep private unless you deliberately expose it. |
+| Gotify app/UI | `https://gotify.robertboscacci.com` | Real HTTPS cert, reachable only from tailnet devices. |
 
 ## Runtime Shape
 
@@ -47,6 +53,7 @@ Route53 should have a plain `A` record:
 
 ```text
 laundry.robertboscacci.com.  A  100.124.5.39
+gotify.robertboscacci.com.   A  100.124.5.39
 ```
 
 There should be no public CloudFront alias for this monitor and no public Funnel

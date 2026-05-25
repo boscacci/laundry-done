@@ -19,7 +19,8 @@ provider "aws" {
 }
 
 locals {
-  fqdn = "${var.record_name}.${var.zone_name}"
+  laundry_fqdn = "${var.laundry_record_name}.${var.zone_name}"
+  gotify_fqdn  = "${var.gotify_record_name}.${var.zone_name}"
 }
 
 data "aws_route53_zone" "site" {
@@ -29,7 +30,15 @@ data "aws_route53_zone" "site" {
 
 resource "aws_route53_record" "laundry_ipv4" {
   zone_id = data.aws_route53_zone.site.zone_id
-  name    = local.fqdn
+  name    = local.laundry_fqdn
+  type    = "A"
+  ttl     = 300
+  records = [var.tailnet_ipv4]
+}
+
+resource "aws_route53_record" "gotify_ipv4" {
+  zone_id = data.aws_route53_zone.site.zone_id
+  name    = local.gotify_fqdn
   type    = "A"
   ttl     = 300
   records = [var.tailnet_ipv4]

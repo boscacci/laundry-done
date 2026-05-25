@@ -9,3 +9,11 @@ laundry.robertboscacci.com {
 
 	reverse_proxy relay:8080
 }
+
+gotify.robertboscacci.com {
+	tls {
+		dns route53
+	}
+
+	reverse_proxy gotify:80
+}
