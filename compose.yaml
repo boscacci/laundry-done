@@ -1,4 +1,20 @@
 services:
+  caddy:
+    build: ./services/caddy
+    restart: unless-stopped
+    depends_on:
+      - relay
+    environment:
+      AWS_REGION: us-west-2
+      AWS_SDK_LOAD_CONFIG: "1"
+    ports:
+      - "127.0.0.1:8444:443"
+    volumes:
+      - ./services/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./data/caddy/data:/data
+      - ./data/caddy/config:/config
+      - ${HOME}/.aws:/root/.aws:ro
+
   relay:
     build: ./server
     restart: unless-stopped
@@ -17,6 +33,6 @@ services:
       GOTIFY_DEFAULTUSER_NAME: admin
       GOTIFY_DEFAULTUSER_PASS: ${GOTIFY_DEFAULTUSER_PASS}
     ports:
-      - "8089:80"
+      - "127.0.0.1:8089:80"
     volumes:
       - ./data/gotify:/app/data

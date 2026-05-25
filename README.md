@@ -1,56 +1,72 @@
 # Laundry Done
 
-An ESP32 + accelerometer laundry notifier for a stacked apartment washer/dryer.
-The device sticks to the shared appliance body, watches for vibration, and sends
-a Gotify phone alert when the washer, dryer, or whole stack has been quiet long
-enough to be considered done.
+An ESP32 laundry-finished detector for apartment washer/dryer stacks. The device
+sticks to the outside of the machine, watches vibration with an accelerometer,
+and sends a phone notification when the washer, dryer, or whole stack has been
+quiet long enough to count as done.
 
-This is designed as an instructable-style project: cheap parts, no appliance
-disassembly, no mains wiring, and a small Docker relay that can run on a home
-server.
+The project is designed to be approachable:
 
-## What It Does
+- No appliance disassembly.
+- No mains wiring.
+- Battery-bank friendly.
+- One small sensor puck on the outside of the washer/dryer.
+- A Docker relay that can run on a home server.
+- A live calibration dashboard for seeing the vibration data.
 
-- Detects laundry motion with an LSM6DS3 or LIS3DH accelerometer.
-- Runs the washer/dryer decision locally on the ESP32.
-- Sends only finished-cycle events over Wi-Fi.
-- Relays events through a FastAPI service on `optiplex-lan`.
-- Pushes Android notifications with Gotify.
-- Handles the normal sequential flow: washer first, dryer second.
-- Falls back to a generic `Laundry stack stopped` alert for ambiguous tandem
-  washer/dryer motion.
+## What You Build
 
 ```mermaid
 flowchart LR
-  A["Stacked washer/dryer vibration"] --> B["LSM6DS3 or LIS3DH accelerometer"]
-  B --> C["ESP32 detector state machine"]
-  C -->|"signed HTTP event"| D["FastAPI relay on optiplex-lan"]
-  D --> E["Gotify server"]
-  E --> F["Android notification"]
+  washer["Washer/dryer body"] -->|"Vibrates"| sensor["ESP32 + accelerometer puck"]
+  sensor -->|"Signed Wi-Fi POST"| relay["FastAPI relay"]
+  relay -->|"Stores samples"| database["SQLite event log"]
+  relay -->|"Push alert"| gotify["Gotify"]
+  gotify -->|"Notification"| phone["Android phone"]
+  relay -->|"Live chart"| dashboard["Browser dashboard"]
 ```
 
-## Repo Layout
+## How It Works
 
-- `firmware/` - PlatformIO Arduino firmware and unit-tested detector logic.
-- `server/` - FastAPI relay, Dockerfile, and pytest tests.
-- `compose.yaml` - Relay + Gotify compose stack for the home server.
-- `docs/parts-guide.md` - Amazon-oriented order guide.
-- `docs/build-guide.md` - Hardware, firmware, server, and calibration steps.
+The accelerometer samples motion for a short window and reports two plain-English
+numbers:
+
+- `Vibration strength`: the typical shake during the sample window.
+- `Biggest jolt`: the largest instant change during that same window.
+
+The ESP32 signs each event with an HMAC secret before sending it to the relay.
+The relay rejects unsigned traffic, stores calibration samples locally, and asks
+Gotify to notify your phone for finished-cycle events.
+
+The current production firmware keeps a 10-second telemetry cadence while it is
+awake, uses NTP timestamps when Wi-Fi is available, and keeps the onboard LED off
+except for a tiny blink when transmitting.
+
+## Documentation Map
+
+- [Instructable draft](docs/instructable.md): copy-paste friendly article text.
+- [Build guide](docs/build-guide.md): bench wiring, flashing, relay setup, and
+  calibration.
+- [HTTPS access](docs/https-access.md): optional Tailscale Serve setup for a
+  trusted HTTPS dashboard URL.
+- [Parts guide](docs/parts-guide.md): Amazon-friendly search terms and buying
+  notes.
+- [Architecture diagrams](docs/architecture.md): Mermaid diagrams for GitHub,
+  Instructables, or Figma.
+- [GitHub publishing notes](docs/github-publish.md): repo description and topics.
 
 ## Quick Start
 
-1. Order the accelerometer and small build supplies from
+1. Order a supported I2C accelerometer and build supplies from
    [docs/parts-guide.md](docs/parts-guide.md).
-2. Build the small sensor puck using [docs/build-guide.md](docs/build-guide.md).
-3. Copy `.env.example` to `.env` on `optiplex-lan` and edit the secrets.
+2. Wire the accelerometer to the ESP32 on the bench using
+   [docs/build-guide.md](docs/build-guide.md).
+3. Copy `.env.example` to `.env` on your home server and edit the secrets.
 4. Start the relay and Gotify:
 
    ```bash
    docker compose up -d --build
    ```
-
-   Gotify Android login uses username `admin`. The password is
-   `GOTIFY_DEFAULTUSER_PASS` from the server-side `.env` file.
 
 5. Copy `firmware/include/laundry_config.h.example` to
    `firmware/include/laundry_config.h`, set Wi-Fi and relay values, then upload:
@@ -59,36 +75,52 @@ flowchart LR
    pio run -e esp32dev -t upload
    ```
 
-6. Run one washer cycle and one dryer cycle while watching serial logs. Adjust
-   thresholds only if the defaults misclassify your actual machine.
+6. Open the dashboard:
+
+   ```text
+   http://<home-server-lan-ip>:8088/monitor
+   ```
+
+7. Optional: expose the dashboard privately over trusted HTTPS with
+   [Tailscale Serve](docs/https-access.md).
+8. Mount the puck on the washer/dryer, start a load, and watch the live chart.
+
+## Repo Layout
+
+```text
+.
+├── compose.yaml                 # Relay + Gotify Docker Compose stack
+├── docs/                        # Build, parts, diagrams, instructable draft
+├── firmware/                    # PlatformIO ESP32 firmware
+├── server/                      # FastAPI relay and pytest tests
+└── README.md
+```
 
 ## Development
 
-Run the host-side tests:
+Run the server tests:
 
 ```bash
-pio test -e native
-pytest tests -q
+conda run -n data python -m pytest server/tests -q
 ```
 
-From the repo root, use `pytest` like this:
+Run the firmware logic tests:
 
 ```bash
-cd server
-pytest tests -q
+platformio test -e native
 ```
 
 Build the ESP32 firmware:
 
 ```bash
-pio run -e esp32dev
+platformio run -e esp32dev
 ```
 
 Bench-test an attached accelerometer by mapping motion to the onboard LED:
 
 ```bash
-pio run -e accel_led_test -t upload --upload-port /dev/cu.usbserial-8
-pio device monitor --port /dev/cu.usbserial-8 --baud 115200
+platformio run -e accel_led_test -t upload --upload-port /dev/cu.usbserial-8
+platformio device monitor --port /dev/cu.usbserial-8 --baud 115200
 ```
 
 ## Safety

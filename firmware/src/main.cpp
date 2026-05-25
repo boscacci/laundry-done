@@ -3,7 +3,10 @@
 #include <HTTPClient.h>
 #include <WiFi.h>
 #include <Wire.h>
+#include <esp_sleep.h>
+#include <esp_system.h>
 #include <mbedtls/md.h>
+#include <time.h>
 
 #include <Adafruit_LIS3DH.h>
 #include <Adafruit_LSM6DS3.h>
@@ -24,22 +27,48 @@
 #define DEVICE_SECRET "configure-me"
 #endif
 
+#ifndef WIFI_DEBUG_SSID_PREFIX
+#define WIFI_DEBUG_SSID_PREFIX ""
+#endif
+
+#ifndef LAUNDRY_KEEP_WIFI_CONNECTED
+#define LAUNDRY_KEEP_WIFI_CONNECTED 0
+#endif
+
+#ifndef LAUNDRY_USE_LIGHT_SLEEP
+#define LAUNDRY_USE_LIGHT_SLEEP 0
+#endif
+
+#ifndef LAUNDRY_TRANSMIT_LED_BLINK_MS
+#define LAUNDRY_TRANSMIT_LED_BLINK_MS 35
+#endif
+
 namespace {
 constexpr uint8_t kLedPin = 2;
 constexpr uint8_t kSdaPin = 21;
 constexpr uint8_t kSclPin = 22;
 constexpr unsigned long kSampleWindowMs = 4000;
-constexpr unsigned long kIdlePollMs = 60000;
-constexpr unsigned long kRunningPollMs = 20000;
+constexpr unsigned long kSampleIntervalMs = 40;
+constexpr unsigned long kRunningPollMs = 10000;
+constexpr unsigned long kBatteryKeepAwakeMs = 15UL * 60UL * 1000UL;
+constexpr unsigned long kBatteryKeepAwakePollMs = 10000;
+
+struct WifiTarget {
+  bool seen = false;
+  int32_t channel = 0;
+  int rssi = -127;
+  int encryption = 0;
+};
 
 Adafruit_LIS3DH lis = Adafruit_LIS3DH();
 Adafruit_LSM6DS3 lsm6ds3 = Adafruit_LSM6DS3();
 Adafruit_LSM6DS3TRC lsm6ds3trc = Adafruit_LSM6DS3TRC();
 Adafruit_LSM6DSOX lsm6dsox = Adafruit_LSM6DSOX();
-LaundryDetector detector;
-uint32_t cycle_counter = 0;
-unsigned long last_motion_ms = 0;
-CycleLabel last_posted_label = CycleLabel::Unknown;
+uint32_t telemetry_counter = 0;
+String boot_id;
+String telemetry_run_id;
+bool clock_configured = false;
+bool clock_synced = false;
 
 enum class MotionSensor {
   None,
@@ -50,18 +79,13 @@ enum class MotionSensor {
 };
 MotionSensor motion_sensor = MotionSensor::None;
 
-const char *label_to_string(CycleLabel label) {
-  switch (label) {
-  case CycleLabel::Washer:
-    return "washer";
-  case CycleLabel::Dryer:
-    return "dryer";
-  case CycleLabel::Stack:
-    return "stack";
-  case CycleLabel::Unknown:
-  default:
-    return "unknown";
+void blink_transmit_led() {
+  if (LAUNDRY_TRANSMIT_LED_BLINK_MS == 0) {
+    return;
   }
+  digitalWrite(kLedPin, HIGH);
+  delay(LAUNDRY_TRANSMIT_LED_BLINK_MS);
+  digitalWrite(kLedPin, LOW);
 }
 
 const char *motion_sensor_to_string(MotionSensor sensor) {
@@ -78,6 +102,50 @@ const char *motion_sensor_to_string(MotionSensor sensor) {
   default:
     return "none";
   }
+}
+
+String make_boot_id() {
+  const uint32_t nonce = esp_random();
+  return String(millis()) + "-" + String(nonce, HEX);
+}
+
+bool clock_is_valid(time_t now) {
+  return now > 1704067200; // 2024-01-01T00:00:00Z
+}
+
+String format_utc(time_t now) {
+  if (!clock_is_valid(now)) {
+    return "";
+  }
+  struct tm utc;
+  gmtime_r(&now, &utc);
+  char formatted[25];
+  strftime(formatted, sizeof(formatted), "%Y-%m-%dT%H:%M:%SZ", &utc);
+  return String(formatted);
+}
+
+String device_time_utc() {
+  return format_utc(time(nullptr));
+}
+
+void maybe_sync_clock() {
+  if (clock_synced || WiFi.status() != WL_CONNECTED) {
+    return;
+  }
+  if (!clock_configured) {
+    configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+    clock_configured = true;
+  }
+  for (uint8_t attempt = 0; attempt < 15; attempt++) {
+    const time_t now = time(nullptr);
+    if (clock_is_valid(now)) {
+      clock_synced = true;
+      Serial.printf("time_synced=true epoch=%ld\n", static_cast<long>(now));
+      return;
+    }
+    delay(100);
+  }
+  Serial.println("time_synced=false");
 }
 
 bool setup_motion_sensor() {
@@ -182,71 +250,182 @@ MotionWindow sample_motion_window() {
     }
     previous = current;
     count++;
-    delay(40);
+    delay(kSampleIntervalMs);
   }
 
   const float rms = count == 0 ? 0.0f : sqrtf(sum_sq / count);
-  if (rms > 12.0f) {
-    last_motion_ms = millis();
+  return MotionWindow{millis(), static_cast<uint16_t>((kSampleWindowMs + 999UL) / 1000UL), rms, peak};
+}
+
+WifiTarget scan_wifi_target() {
+  WifiTarget target;
+  const int network_count = WiFi.scanNetworks(false, true);
+  uint8_t channel_counts[15] = {0};
+  uint32_t target_hash = 2166136261UL;
+  for (const char *cursor = WIFI_SSID; *cursor != '\0'; cursor++) {
+    target_hash ^= static_cast<uint8_t>(*cursor);
+    target_hash *= 16777619UL;
   }
-  return MotionWindow{millis(), 4, rms, peak};
+  Serial.printf("wifi_target len=%u hash=%08lx debug_prefix_len=%u\n",
+                strlen(WIFI_SSID),
+                target_hash,
+                strlen(WIFI_DEBUG_SSID_PREFIX));
+  for (int i = 0; i < network_count; i++) {
+    const String scanned_ssid = WiFi.SSID(i);
+    const int32_t channel = WiFi.channel(i);
+    uint32_t scanned_hash = 2166136261UL;
+    for (uint16_t j = 0; j < scanned_ssid.length(); j++) {
+      scanned_hash ^= static_cast<uint8_t>(scanned_ssid[j]);
+      scanned_hash *= 16777619UL;
+    }
+    if (channel >= 1 && channel <= 14) {
+      channel_counts[channel]++;
+    }
+    const bool is_candidate = scanned_ssid == WIFI_SSID;
+    const bool is_debug_prefix_match =
+        strlen(WIFI_DEBUG_SSID_PREFIX) > 0 &&
+        scanned_ssid.startsWith(WIFI_DEBUG_SSID_PREFIX);
+    if (is_candidate || is_debug_prefix_match) {
+      Serial.printf("wifi_candidate exact=%s len=%u hash=%08lx channel=%d rssi=%d encryption=%d\n",
+                    is_candidate ? "true" : "false",
+                    scanned_ssid.length(),
+                    scanned_hash,
+                    channel,
+                    WiFi.RSSI(i),
+                    WiFi.encryptionType(i));
+    }
+    if (is_candidate && WiFi.RSSI(i) > target.rssi) {
+      target.seen = true;
+      target.rssi = WiFi.RSSI(i);
+      target.encryption = WiFi.encryptionType(i);
+      target.channel = channel;
+    }
+  }
+  Serial.printf("wifi_scan count=%d target_seen=%s target_channel=%d target_rssi=%d target_encryption=%d\n",
+                network_count,
+                target.seen ? "true" : "false",
+                target.channel,
+                target.rssi,
+                target.encryption);
+  Serial.printf("wifi_channel_counts ch1=%u ch2=%u ch3=%u ch4=%u ch5=%u ch6=%u ch7=%u ch8=%u ch9=%u ch10=%u ch11=%u ch12=%u ch13=%u ch14=%u\n",
+                channel_counts[1],
+                channel_counts[2],
+                channel_counts[3],
+                channel_counts[4],
+                channel_counts[5],
+                channel_counts[6],
+                channel_counts[7],
+                channel_counts[8],
+                channel_counts[9],
+                channel_counts[10],
+                channel_counts[11],
+                channel_counts[12],
+                channel_counts[13],
+                channel_counts[14]);
+  WiFi.scanDelete();
+  return target;
+}
+
+void log_target_wifi_scan() {
+  scan_wifi_target();
+}
+
+bool battery_keep_awake_active() {
+  return millis() < kBatteryKeepAwakeMs;
+}
+
+void maybe_sleep_wifi() {
+  if (LAUNDRY_KEEP_WIFI_CONNECTED || battery_keep_awake_active()) {
+    return;
+  }
+  WiFi.disconnect(true);
+  WiFi.mode(WIFI_OFF);
+}
+
+void nap(unsigned long nap_ms) {
+  if (nap_ms == 0) {
+    return;
+  }
+#if LAUNDRY_USE_LIGHT_SLEEP
+  Serial.printf("sleep mode=light duration_ms=%lu\n", nap_ms);
+  Serial.flush();
+  WiFi.mode(WIFI_OFF);
+  esp_sleep_enable_timer_wakeup(static_cast<uint64_t>(nap_ms) * 1000ULL);
+  esp_light_sleep_start();
+#else
+  delay(nap_ms);
+#endif
 }
 
 bool connect_wifi() {
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.printf("wifi_reuse_connected=true rssi=%d\n", WiFi.RSSI());
+    maybe_sync_clock();
+    return true;
+  }
+
+  WiFi.persistent(false);
+  WiFi.disconnect(true, true);
+  delay(250);
   WiFi.mode(WIFI_STA);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  const unsigned long started = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - started < 15000) {
+  WiFi.setSleep(false);
+  WiFi.setMinSecurity(WIFI_AUTH_WPA_PSK);
+  WifiTarget target = scan_wifi_target();
+  const auto wait_for_connection = [](unsigned long timeout_ms) {
+    const unsigned long started = millis();
+    while (WiFi.status() != WL_CONNECTED && millis() - started < timeout_ms) {
+      delay(250);
+    }
+    return millis() - started;
+  };
+  if (target.seen) {
+    Serial.printf("wifi_begin target_channel=%d target_rssi=%d\n", target.channel, target.rssi);
+    WiFi.begin(WIFI_SSID, WIFI_PASSWORD, target.channel);
+  } else {
+    Serial.println("wifi_begin target_channel=0 target_unseen=true");
+    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  }
+  unsigned long elapsed_ms = wait_for_connection(12000);
+  const wl_status_t status = WiFi.status();
+  if (status == WL_CONNECTED) {
+    Serial.printf("wifi_connected=true rssi=%d elapsed_ms=%lu\n",
+                  WiFi.RSSI(),
+                  elapsed_ms);
+    maybe_sync_clock();
+    return true;
+  }
+  if (target.seen) {
+    Serial.printf("wifi_channel_connect_failed=true status=%d elapsed_ms=%lu fallback=generic\n",
+                  static_cast<int>(status),
+                  elapsed_ms);
+    WiFi.disconnect(false, false);
     delay(250);
+    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    elapsed_ms = wait_for_connection(12000);
+    if (WiFi.status() == WL_CONNECTED) {
+      Serial.printf("wifi_connected=true mode=generic rssi=%d elapsed_ms=%lu\n",
+                    WiFi.RSSI(),
+                    elapsed_ms);
+      maybe_sync_clock();
+      return true;
+    }
   }
-  return WiFi.status() == WL_CONNECTED;
-}
-
-bool post_done_event(const Decision &decision, const MotionWindow &window) {
-  if (!connect_wifi()) {
-    Serial.println("event_post wifi_failed=true");
-    WiFi.disconnect(true);
-    WiFi.mode(WIFI_OFF);
-    return false;
-  }
-
-  JsonDocument doc;
-  const String cycle_id = String("cycle-") + String(cycle_counter);
-  const String event_id = cycle_id + String("-done-") + String(window.at_ms);
-  doc["device_id"] = DEVICE_ID;
-  doc["event_id"] = event_id;
-  doc["cycle_id"] = cycle_id;
-  doc["state"] = "done_sent";
-  doc["cycle_label"] = label_to_string(decision.label);
-  doc["motion_rms_mg"] = window.rms_mg;
-  doc["last_motion_ms"] = window.at_ms - last_motion_ms;
-  doc["firmware_version"] = FIRMWARE_VERSION;
-
-  String body;
-  serializeJson(doc, body);
-
-  HTTPClient http;
-  http.begin(RELAY_URL);
-  http.addHeader("content-type", "application/json");
-  http.addHeader("x-laundry-signature", hmac_sha256(body));
-  const int status = http.POST(body);
-  Serial.printf("event_post status=%d label=%s\n", status, label_to_string(decision.label));
-  http.end();
-  WiFi.disconnect(true);
-  WiFi.mode(WIFI_OFF);
-  return status >= 200 && status < 300;
+  Serial.printf("wifi_connected=false status=%d elapsed_ms=%lu\n",
+                static_cast<int>(WiFi.status()),
+                elapsed_ms);
+  log_target_wifi_scan();
+  return false;
 }
 
 bool post_motion_started_event(uint32_t event_counter, float motion_mg) {
   if (!connect_wifi()) {
     Serial.println("motion_post wifi_failed=true");
-    WiFi.disconnect(true);
-    WiFi.mode(WIFI_OFF);
+    maybe_sleep_wifi();
     return false;
   }
 
   JsonDocument doc;
-  const String event_id = String("motion-") + String(event_counter) + "-" + String(millis());
+  const String event_id = String("motion-") + boot_id + "-" + String(event_counter) + "-" + String(millis());
   doc["device_id"] = DEVICE_ID;
   doc["event_id"] = event_id;
   doc["cycle_id"] = "motion-request-test";
@@ -255,6 +434,10 @@ bool post_motion_started_event(uint32_t event_counter, float motion_mg) {
   doc["motion_rms_mg"] = motion_mg;
   doc["last_motion_ms"] = 0;
   doc["firmware_version"] = FIRMWARE_VERSION;
+  const String device_time = device_time_utc();
+  if (device_time.length() > 0) {
+    doc["device_time_utc"] = device_time;
+  }
 
   String body;
   serializeJson(doc, body);
@@ -263,14 +446,65 @@ bool post_motion_started_event(uint32_t event_counter, float motion_mg) {
   http.begin(RELAY_URL);
   http.addHeader("content-type", "application/json");
   http.addHeader("x-laundry-signature", hmac_sha256(body));
+  blink_transmit_led();
   const int status = http.POST(body);
   Serial.printf("motion_post status=%d event_id=%s motion_mg=%.1f\n",
                 status,
                 event_id.c_str(),
                 motion_mg);
   http.end();
-  WiFi.disconnect(true);
-  WiFi.mode(WIFI_OFF);
+  maybe_sleep_wifi();
+  return status >= 200 && status < 300;
+}
+
+bool post_calibration_sample_event(uint32_t event_counter,
+                                   const String &run_id,
+                                   const MotionWindow &window,
+                                   time_t sample_epoch_seconds) {
+  if (!connect_wifi()) {
+    Serial.println("calibration_post wifi_failed=true");
+    maybe_sleep_wifi();
+    return false;
+  }
+
+  JsonDocument doc;
+  const String event_id = run_id + String("-sample-") + String(event_counter) + "-" + String(window.at_ms);
+  doc["device_id"] = DEVICE_ID;
+  doc["event_id"] = event_id;
+  doc["cycle_id"] = run_id;
+  doc["state"] = "calibration_sample";
+  doc["cycle_label"] = "unknown";
+  doc["motion_rms_mg"] = window.rms_mg;
+  doc["last_motion_ms"] = 0;
+  doc["firmware_version"] = FIRMWARE_VERSION;
+  doc["peak_mg"] = window.peak_mg;
+  doc["sample_window_ms"] = kSampleWindowMs;
+  doc["sample_count"] = kSampleWindowMs / kSampleIntervalMs;
+  doc["sensor_type"] = motion_sensor_to_string(motion_sensor);
+  doc["uptime_ms"] = window.at_ms;
+  doc["wifi_rssi"] = WiFi.status() == WL_CONNECTED ? WiFi.RSSI() : -127;
+  const String device_time = format_utc(sample_epoch_seconds);
+  if (device_time.length() > 0) {
+    doc["device_time_utc"] = device_time;
+  }
+
+  String body;
+  serializeJson(doc, body);
+
+  HTTPClient http;
+  http.begin(RELAY_URL);
+  http.addHeader("content-type", "application/json");
+  http.addHeader("x-laundry-signature", hmac_sha256(body));
+  blink_transmit_led();
+  const int status = http.POST(body);
+  Serial.printf("calibration_post status=%d event_id=%s rms_mg=%.1f peak_mg=%.1f rssi=%d\n",
+                status,
+                event_id.c_str(),
+                window.rms_mg,
+                window.peak_mg,
+                WiFi.status() == WL_CONNECTED ? WiFi.RSSI() : -127);
+  http.end();
+  maybe_sleep_wifi();
   return status >= 200 && status < 300;
 }
 } // namespace
@@ -388,10 +622,86 @@ void loop() {
   delay(100);
 }
 
+#elif LAUNDRY_CALIBRATION_CAPTURE
+
+namespace {
+uint32_t calibration_counter = 0;
+String calibration_run_id;
+
+void blink_led(uint8_t count, unsigned int on_ms, unsigned int off_ms) {
+  for (uint8_t i = 0; i < count; i++) {
+    digitalWrite(kLedPin, HIGH);
+    delay(on_ms);
+    digitalWrite(kLedPin, LOW);
+    delay(off_ms);
+  }
+}
+} // namespace
+
+void setup() {
+  Serial.begin(115200);
+  delay(1000);
+  pinMode(kLedPin, OUTPUT);
+  digitalWrite(kLedPin, LOW);
+  WiFi.mode(WIFI_OFF);
+
+  if (!setup_motion_sensor()) {
+    Serial.println("calibration_capture_ready=false sensor_detected=false");
+    while (true) {
+      blink_led(1, 100, 100);
+    }
+  }
+
+  boot_id = make_boot_id();
+  calibration_run_id = String("calibration-") + String(DEVICE_ID) + "-" + boot_id;
+  Serial.printf("sensor_type=%s\n", motion_sensor_to_string(motion_sensor));
+  const bool wifi_hot = connect_wifi();
+  Serial.printf("calibration_wifi_hot=%s\n", wifi_hot ? "true" : "false");
+  Serial.printf("calibration_capture_ready=true run_id=%s sample_window_ms=%lu post_interval_ms=0 wifi_keepalive=%s\n",
+                calibration_run_id.c_str(),
+                kSampleWindowMs,
+                LAUNDRY_KEEP_WIFI_CONNECTED ? "true" : "false");
+  blink_led(3, 120, 120);
+}
+
+void loop() {
+  digitalWrite(kLedPin, HIGH);
+  const time_t sample_epoch_seconds = time(nullptr);
+  MotionWindow window = sample_motion_window();
+  digitalWrite(kLedPin, LOW);
+  calibration_counter++;
+
+  Serial.printf("calibration_sample counter=%lu rms_mg=%.1f peak_mg=%.1f\n",
+                static_cast<unsigned long>(calibration_counter),
+                window.rms_mg,
+                window.peak_mg);
+  const bool ok = post_calibration_sample_event(
+      calibration_counter,
+      calibration_run_id,
+      window,
+      sample_epoch_seconds);
+  Serial.printf("calibration_result ok=%s\n", ok ? "true" : "false");
+  if (ok) {
+    blink_led(1, 250, 100);
+  } else {
+    blink_led(8, 60, 60);
+  }
+}
+
 #elif LAUNDRY_MOTION_REQUEST_TEST
 
 namespace {
-MovementTrigger motion_request_trigger;
+constexpr float kMotionRequestThresholdMg = 8.0f;
+
+MovementTriggerConfig motion_request_config() {
+  MovementTriggerConfig config;
+  config.threshold_mg = kMotionRequestThresholdMg;
+  config.confirm_motion_ms = 300UL;
+  config.cooldown_ms = 5000UL;
+  return config;
+}
+
+MovementTrigger motion_request_trigger(motion_request_config());
 uint32_t motion_request_counter = 0;
 float previous_x = 0.0f;
 float previous_y = 0.0f;
@@ -418,6 +728,15 @@ float read_delta_mg() {
   have_previous = true;
   return delta_mg;
 }
+
+void blink_led(uint8_t count, unsigned int on_ms, unsigned int off_ms) {
+  for (uint8_t i = 0; i < count; i++) {
+    digitalWrite(kLedPin, HIGH);
+    delay(on_ms);
+    digitalWrite(kLedPin, LOW);
+    delay(off_ms);
+  }
+}
 } // namespace
 
 void setup() {
@@ -437,26 +756,39 @@ void setup() {
     }
   }
 
+  boot_id = make_boot_id();
   Serial.printf("sensor_type=%s\n", motion_sensor_to_string(motion_sensor));
-  Serial.println("motion_request_test_ready=true threshold_mg=30 confirm_ms=3000 cooldown_ms=60000");
+#if LAUNDRY_KEEP_WIFI_CONNECTED
+  const bool wifi_hot = connect_wifi();
+  Serial.printf("motion_request_wifi_hot=%s\n", wifi_hot ? "true" : "false");
+#else
+  log_target_wifi_scan();
+#endif
+  Serial.printf("motion_request_test_ready=true threshold_mg=%.1f confirm_ms=300 cooldown_ms=5000 wifi_keepalive=%s\n",
+                kMotionRequestThresholdMg,
+                LAUNDRY_KEEP_WIFI_CONNECTED ? "true" : "false");
+  blink_led(2, 120, 120);
 }
 
 void loop() {
   const float delta_mg = read_delta_mg();
   const bool should_post = motion_request_trigger.observe(millis(), delta_mg);
-  digitalWrite(kLedPin, delta_mg >= 30.0f ? HIGH : LOW);
+  digitalWrite(kLedPin, delta_mg >= kMotionRequestThresholdMg ? HIGH : LOW);
   Serial.printf("motion_sample delta_mg=%.1f active=%s should_post=%s\n",
                 delta_mg,
-                delta_mg >= 30.0f ? "true" : "false",
+                delta_mg >= kMotionRequestThresholdMg ? "true" : "false",
                 should_post ? "true" : "false");
 
   if (should_post) {
     motion_request_counter++;
-    digitalWrite(kLedPin, HIGH);
+    blink_led(6, 60, 60);
     const bool ok = post_motion_started_event(motion_request_counter, delta_mg);
     Serial.printf("motion_result ok=%s\n", ok ? "true" : "false");
-    digitalWrite(kLedPin, ok ? HIGH : LOW);
-    delay(ok ? 1000 : 200);
+    if (ok) {
+      blink_led(2, 300, 120);
+    } else {
+      blink_led(10, 50, 50);
+    }
   }
 
   delay(100);
@@ -473,13 +805,12 @@ uint32_t button_counter = 0;
 bool post_button_event() {
   if (!connect_wifi()) {
     Serial.println("button_post wifi_failed=true");
-    WiFi.disconnect(true);
-    WiFi.mode(WIFI_OFF);
+    maybe_sleep_wifi();
     return false;
   }
 
   JsonDocument doc;
-  const String event_id = String("button-") + String(button_counter) + "-" + String(millis());
+  const String event_id = String("button-") + boot_id + "-" + String(button_counter) + "-" + String(millis());
   doc["device_id"] = DEVICE_ID;
   doc["event_id"] = event_id;
   doc["cycle_id"] = "manual-button-test";
@@ -488,6 +819,10 @@ bool post_button_event() {
   doc["motion_rms_mg"] = 0.0;
   doc["last_motion_ms"] = 0;
   doc["firmware_version"] = FIRMWARE_VERSION;
+  const String device_time = device_time_utc();
+  if (device_time.length() > 0) {
+    doc["device_time_utc"] = device_time;
+  }
 
   String body;
   serializeJson(doc, body);
@@ -496,11 +831,11 @@ bool post_button_event() {
   http.begin(RELAY_URL);
   http.addHeader("content-type", "application/json");
   http.addHeader("x-laundry-signature", hmac_sha256(body));
+  blink_transmit_led();
   const int status = http.POST(body);
   Serial.printf("button_post status=%d event_id=%s\n", status, event_id.c_str());
   http.end();
-  WiFi.disconnect(true);
-  WiFi.mode(WIFI_OFF);
+  maybe_sleep_wifi();
   return status >= 200 && status < 300;
 }
 } // namespace
@@ -512,6 +847,7 @@ void setup() {
   pinMode(kButtonPin, INPUT_PULLUP);
   digitalWrite(kLedPin, LOW);
   WiFi.mode(WIFI_OFF);
+  boot_id = make_boot_id();
   Serial.println("button_test_ready=true button_pin=0");
 }
 
@@ -535,6 +871,7 @@ void setup() {
   Serial.begin(115200);
   delay(1000);
   pinMode(kLedPin, OUTPUT);
+  digitalWrite(kLedPin, LOW);
 
   if (!setup_motion_sensor()) {
     Serial.println("sensor_detected=false");
@@ -544,30 +881,50 @@ void setup() {
   }
 
   WiFi.mode(WIFI_OFF);
+  boot_id = make_boot_id();
   Serial.printf("sensor_type=%s\n", motion_sensor_to_string(motion_sensor));
+  telemetry_run_id = String("production-") + String(DEVICE_ID) + "-" + boot_id;
+  Serial.printf("telemetry_enabled=true run_id=%s sample_window_ms=%lu poll_ms=%lu battery_keep_awake_ms=%lu battery_keep_awake_poll_ms=%lu classifier=server\n",
+                telemetry_run_id.c_str(),
+                kSampleWindowMs,
+                kRunningPollMs,
+                kBatteryKeepAwakeMs,
+                kBatteryKeepAwakePollMs);
   Serial.println("sensor_detected=true");
 }
 
 void loop() {
+  const unsigned long sample_started_ms = millis();
+  const time_t sample_epoch_seconds = time(nullptr);
   MotionWindow window = sample_motion_window();
-  Decision decision = detector.observe(window);
 
-  Serial.printf("motion rms_mg=%.2f peak_mg=%.2f state=%d label=%s\n",
+  Serial.printf("motion rms_mg=%.2f peak_mg=%.2f classification=server\n",
                 window.rms_mg,
-                window.peak_mg,
-                static_cast<int>(decision.state),
-                label_to_string(decision.label));
+                window.peak_mg);
 
-  if (decision.should_post) {
-    last_posted_label = decision.label;
-    post_done_event(decision, window);
+  telemetry_counter++;
+  const bool telemetry_ok = post_calibration_sample_event(
+      telemetry_counter,
+      telemetry_run_id,
+      window,
+      sample_epoch_seconds);
+  Serial.printf("telemetry_result ok=%s\n", telemetry_ok ? "true" : "false");
+
+  const unsigned long target_interval_ms = kRunningPollMs;
+  unsigned long nap_ms = nap_duration_ms(sample_started_ms, millis(), target_interval_ms);
+  const time_t now_epoch_seconds = time(nullptr);
+  const bool wall_clock_aligned = clock_synced && clock_is_valid(now_epoch_seconds);
+  if (wall_clock_aligned) {
+    nap_ms = aligned_wall_clock_nap_ms(
+        static_cast<long>(now_epoch_seconds),
+        target_interval_ms);
   }
-
-  const unsigned long nap_ms =
-      decision.state == DetectorState::Idle || decision.state == DetectorState::DoneSent
-          ? kIdlePollMs
-          : kRunningPollMs;
-  delay(nap_ms);
+  Serial.printf("target_interval_ms=%lu next_nap_ms=%lu wall_clock_aligned=%s battery_keep_awake=%s classifier=server\n",
+                target_interval_ms,
+                nap_ms,
+                wall_clock_aligned ? "true" : "false",
+                battery_keep_awake_active() ? "true" : "false");
+  nap(nap_ms);
 }
 
 #endif

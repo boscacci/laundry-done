@@ -20,6 +20,20 @@ Recommended GitHub topics:
 esp32, arduino, platformio, fastapi, gotify, home-automation, iot, laundry
 ```
 
+Suggested pinned README blurb:
+
+```text
+Battery-friendly ESP32 sensor puck that watches washer/dryer vibration from the outside, streams calibration data to a local dashboard, and sends Gotify phone alerts when laundry is done.
+```
+
+Good files to highlight in the project description:
+
+- `docs/instructable.md` for the step-by-step article draft.
+- `docs/architecture.md` for diagrams.
+- `docs/parts-guide.md` for order notes.
+- `server/src/laundry_done_relay/app.py` for the relay and dashboard.
+- `firmware/src/main.cpp` for the ESP32 firmware.
+
 After logging in with GitHub CLI:
 
 ```bash
@@ -33,3 +47,9 @@ Do not commit:
 - `firmware/include/laundry_config.h`
 - `data/`
 - `.pio/`
+- `.pytest_cache/`
+- `__pycache__/`
+
+Before publishing, scan docs for personal hostnames, private IPs, screenshots
+with passwords, or anything that identifies your home network. Use placeholders
+such as `<home-server-lan-ip>` in public instructions.
