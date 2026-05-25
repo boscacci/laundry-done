@@ -24,6 +24,7 @@ authentication layer.
 | ESP32 to relay | `http://<home-server-lan-ip>:8088/api/v1/events` | Simple local HTTP, signed with HMAC. |
 | Browser dashboard | `https://laundry.robertboscacci.com/monitor` | Real HTTPS cert, reachable only from tailnet devices. |
 | Gotify app/UI | `https://gotify.robertboscacci.com` | Real HTTPS cert, reachable only from tailnet devices. |
+| Local Gotify port | `127.0.0.1:8089` on the home server | Localhost-only fallback; not exposed to the LAN. |
 
 ## Runtime Shape
 
@@ -62,6 +63,9 @@ on port 443.
 ## Security Notes
 
 - The monitor relies on Tailscale access, not a dashboard password.
+- Gotify's human login can stay intentionally low-friction because the raw
+  Gotify port is localhost-only and the friendly URL points at a Tailscale-only
+  address.
 - The ESP32 event ingest endpoint still requires signed payloads with
   `DEVICE_SECRET`.
 - Keep `GOTIFY_URL` in `.env` as `http://gotify:80`; that is the relay's

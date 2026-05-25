@@ -33,6 +33,6 @@ services:
       GOTIFY_DEFAULTUSER_NAME: admin
       GOTIFY_DEFAULTUSER_PASS: ${GOTIFY_DEFAULTUSER_PASS}
     ports:
-      - "8089:80"
+      - "127.0.0.1:8089:80"
     volumes:
       - ./data/gotify:/app/data
