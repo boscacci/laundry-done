@@ -3,8 +3,10 @@ services:
     build: ./services/caddy
     restart: unless-stopped
     depends_on:
-      - relay
-      - gotify
+      relay:
+        condition: service_healthy
+      gotify:
+        condition: service_healthy
     environment:
       AWS_REGION: us-west-2
       AWS_SDK_LOAD_CONFIG: "1"
@@ -32,6 +34,18 @@ services:
       - "8088:8080"
     volumes:
       - ./data/relay:/data
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=2).read()",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
 
   gotify:
     image: gotify/server:latest
@@ -48,9 +62,12 @@ services:
     build: ./server
     restart: unless-stopped
     depends_on:
-      - caddy
-      - relay
-      - gotify
+      caddy:
+        condition: service_started
+      relay:
+        condition: service_healthy
+      gotify:
+        condition: service_healthy
     command: ["python", "-m", "laundry_done_relay.warmup"]
     environment:
       WARMUP_URLS: ${WARMUP_URLS:-https://laundry.robertboscacci.com/healthz,https://gotify.robertboscacci.com/health}
