@@ -38,14 +38,59 @@ Tailscale forwards tailnet TCP port 443 to that local Caddy listener:
 
 ```bash
 tailscale funnel --https=443 off
+tailscale serve --bg --yes --tcp=80 tcp://127.0.0.1:8081
 tailscale serve --bg --yes --tcp=443 tcp://127.0.0.1:8444
 ```
 
 Expected status:
 
 ```text
+|-- tcp://optiplex.<tailnet>.ts.net:80 (TCP, tailnet only)
+|--> tcp://127.0.0.1:8081
 |-- tcp://optiplex.<tailnet>.ts.net:443 (TLS over TCP, tailnet only)
 |--> tcp://127.0.0.1:8444
+```
+
+Port 80 exists only to catch accidental `http://` browser visits and let Caddy
+redirect them to HTTPS. Without this tailnet-only forward, plain HTTP reaches
+Pi-hole on the host and shows Pi-hole's access-denied page.
+
+## Warm-Up Worker
+
+The Compose stack includes a `warmup` worker that periodically probes Caddy
+with the same URLs used by mobile devices:
+
+```text
+https://laundry.robertboscacci.com/healthz
+https://gotify.robertboscacci.com/health
+```
+
+By default it runs every 5 minutes with a 10-second timeout. It does not send
+Gotify messages and does not need any app tokens. The worker supports TLS
+verification, but the Compose default disables it for this tailnet-only path
+because the home-server-side route can present a self-signed chain even though
+client devices may already trust it. Docker network aliases point those
+hostnames at the Caddy container from inside the Compose network, so SNI, Host,
+and Caddy routing match the mobile-facing route without depending on same-host
+Tailscale hairpin behavior. Its logs are structured JSON records with query
+strings stripped from URLs, so future URL changes do not leak secret parameters
+into logs.
+
+Override the defaults in `.env` only when the private hostnames or cadence
+change:
+
+```text
+WARMUP_URLS=https://laundry.robertboscacci.com/healthz,https://gotify.robertboscacci.com/health
+WARMUP_HOST_HEADERS=
+WARMUP_INTERVAL_SECONDS=300
+WARMUP_TIMEOUT_SECONDS=10
+WARMUP_VERIFY_TLS=false
+```
+
+Check the worker after deploy:
+
+```bash
+docker compose logs --tail=20 warmup
 ```
 
 ## DNS
@@ -76,5 +121,6 @@ on port 443.
 ## Disable
 
 ```bash
+tailscale serve --tcp=80 off
 tailscale serve --tcp=443 off
 ```

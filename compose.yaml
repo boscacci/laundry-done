@@ -4,16 +4,23 @@ services:
     restart: unless-stopped
     depends_on:
       - relay
+      - gotify
     environment:
       AWS_REGION: us-west-2
       AWS_SDK_LOAD_CONFIG: "1"
     ports:
+      - "127.0.0.1:8081:80"
       - "127.0.0.1:8444:443"
     volumes:
       - ./services/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - ./data/caddy/data:/data
       - ./data/caddy/config:/config
       - ${HOME}/.aws:/root/.aws:ro
+    networks:
+      default:
+        aliases:
+          - laundry.robertboscacci.com
+          - gotify.robertboscacci.com
 
   relay:
     build: ./server
@@ -36,3 +43,18 @@ services:
       - "127.0.0.1:8089:80"
     volumes:
       - ./data/gotify:/app/data
+
+  warmup:
+    build: ./server
+    restart: unless-stopped
+    depends_on:
+      - caddy
+      - relay
+      - gotify
+    command: ["python", "-m", "laundry_done_relay.warmup"]
+    environment:
+      WARMUP_URLS: ${WARMUP_URLS:-https://laundry.robertboscacci.com/healthz,https://gotify.robertboscacci.com/health}
+      WARMUP_HOST_HEADERS: ${WARMUP_HOST_HEADERS:-}
+      WARMUP_INTERVAL_SECONDS: ${WARMUP_INTERVAL_SECONDS:-300}
+      WARMUP_TIMEOUT_SECONDS: ${WARMUP_TIMEOUT_SECONDS:-10}
+      WARMUP_VERIFY_TLS: ${WARMUP_VERIFY_TLS:-false}

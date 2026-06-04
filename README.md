@@ -12,6 +12,7 @@ The project is designed to be approachable:
 - Battery-bank friendly.
 - One small sensor puck on the outside of the washer/dryer.
 - A Docker relay that can run on a home server.
+- A warm-up worker that keeps the private mobile-facing routes exercised.
 - A live calibration dashboard for seeing the vibration data.
 
 ## What You Build
@@ -62,7 +63,7 @@ except for a tiny blink when transmitting.
 2. Wire the accelerometer to the ESP32 on the bench using
    [docs/build-guide.md](docs/build-guide.md).
 3. Copy `.env.example` to `.env` on your home server and edit the secrets.
-4. Start the relay and Gotify:
+4. Start the relay, Gotify, and the warm-up worker:
 
    ```bash
    docker compose up -d --build
