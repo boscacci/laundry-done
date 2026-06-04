@@ -17,3 +17,11 @@ gotify.robertboscacci.com {
 
 	reverse_proxy gotify:80
 }
+
+vhf-dev.robertboscacci.com {
+	tls {
+		dns route53
+	}
+
+	reverse_proxy 172.20.0.1:8095
+}
