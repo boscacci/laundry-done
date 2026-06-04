@@ -1275,7 +1275,17 @@ def _monitor_html() -> str:
     function formatAge(seconds) {
       if (!Number.isFinite(seconds)) return '--';
       if (seconds < 90) return `${seconds}s`;
-      return `${Math.round(seconds / 60)}m`;
+      const minutes = Math.round(seconds / 60);
+      if (minutes < 60) return `${minutes} min`;
+      const hours = Math.floor(minutes / 60);
+      const remainingMinutes = minutes % 60;
+      if (hours < 24) {
+        return remainingMinutes > 0 ? `${hours} hr ${remainingMinutes} min` : `${hours} hr`;
+      }
+      const days = Math.floor(hours / 24);
+      const remainingHours = hours % 24;
+      const dayText = days === 1 ? '1 day' : `${days} days`;
+      return remainingHours > 0 ? `${dayText} ${remainingHours} hr` : dayText;
     }
 
     function setConnectionNode(node, stateEl, online, onlineText) {

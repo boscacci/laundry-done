@@ -95,6 +95,19 @@ def _classify_with_dashboard_js(tmp_path, samples: list[dict]) -> list[str]:
     return json.loads(result.stdout)
 
 
+def _dashboard_js_results(tmp_path, function_names: tuple[str, ...], expression: str):
+    html = _monitor_html()
+    script = html.split("<script>", 1)[1].split("</script>", 1)[0]
+    runner = tmp_path / "dashboard-function.js"
+    runner.write_text(
+        "\n".join(_js_function(script, name) for name in function_names)
+        + "\n"
+        + f"console.log(JSON.stringify({expression}));\n"
+    )
+    result = subprocess.run(["node", runner], check=True, capture_output=True, text=True)
+    return json.loads(result.stdout)
+
+
 def test_healthz_reports_ok(tmp_path):
     app = create_app(
         database_path=tmp_path / "events.sqlite3",
@@ -848,6 +861,14 @@ def test_dashboard_classifier_uses_accelerometer_values_without_handoff(tmp_path
 
     assert _classify_with_dashboard_js(tmp_path, washer_samples)[-1] == "washer"
     assert _classify_with_dashboard_js(tmp_path, dryer_samples)[-1] == "dryer"
+
+
+def test_dashboard_formats_stale_check_in_age_as_days_and_hours(tmp_path):
+    assert _dashboard_js_results(
+        tmp_path,
+        ("formatAge",),
+        "[formatAge(45), formatAge(5 * 60), formatAge(65 * 60), formatAge(60 * 60 * 60)]",
+    ) == ["45s", "5 min", "1 hr 5 min", "2 days 12 hr"]
 
 
 def test_dashboard_classifier_uses_eight_sample_smoothed_values(tmp_path):
