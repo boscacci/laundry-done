@@ -45,6 +45,29 @@ struct Decision {
   bool should_post = false;
 };
 
+struct TelemetryCadenceConfig {
+  unsigned long startup_keep_awake_ms = 10UL * 60UL * 1000UL;
+  unsigned long startup_poll_ms = 10UL * 1000UL;
+  unsigned long idle_poll_ms = 30UL * 1000UL;
+  unsigned long running_poll_ms = 10UL * 1000UL;
+  unsigned long battery_keepalive_interval_ms = 15UL * 1000UL;
+  unsigned long battery_keepalive_pulse_ms = 2500UL;
+};
+
+struct BatteryKeepaliveNap {
+  unsigned long sleep_ms = 0;
+  unsigned long awake_pulse_ms = 0;
+  unsigned long remaining_after_slice_ms = 0;
+
+  BatteryKeepaliveNap() = default;
+  BatteryKeepaliveNap(unsigned long sleep_ms,
+                      unsigned long awake_pulse_ms,
+                      unsigned long remaining_after_slice_ms)
+      : sleep_ms(sleep_ms),
+        awake_pulse_ms(awake_pulse_ms),
+        remaining_after_slice_ms(remaining_after_slice_ms) {}
+};
+
 struct MovementTriggerConfig {
   float threshold_mg = 30.0f;
   unsigned long confirm_motion_ms = 3000UL;
@@ -103,12 +126,21 @@ private:
   uint8_t recent_window_index_ = 0;
 };
 
+DetectorConfig telemetry_cadence_detector_config();
+
+unsigned long telemetry_poll_ms(unsigned long now_ms,
+                                DetectorState state,
+                                const TelemetryCadenceConfig &config);
+
 unsigned long telemetry_poll_ms(unsigned long now_ms,
                                 DetectorState state,
                                 unsigned long startup_keep_awake_ms,
                                 unsigned long startup_poll_ms,
                                 unsigned long idle_poll_ms,
                                 unsigned long running_poll_ms);
+
+BatteryKeepaliveNap next_battery_keepalive_nap(unsigned long remaining_nap_ms,
+                                               const TelemetryCadenceConfig &config);
 
 unsigned long nap_duration_ms(unsigned long sample_started_ms,
                               unsigned long now_ms,

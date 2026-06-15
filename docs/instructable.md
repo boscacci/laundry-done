@@ -294,7 +294,11 @@ For the current battery-bank-friendly setup:
 
 1. Press the battery bank power button when starting laundry.
 2. Start the washer or dryer.
-3. Let the ESP32 send samples and finished-cycle events.
+3. Let the ESP32 send samples and finished-cycle events. It checks in every 10
+   seconds for the first 10 minutes, then uses a 30-second idle heartbeat with
+   Wi-Fi off between posts. During that idle heartbeat, it wakes every 15
+   seconds for a 2.5-second Wi-Fi-radio keep-alive pulse so the USB battery bank
+   does not auto-off. It returns to 10-second samples when it sees motion.
 4. Move laundry when Gotify notifies your phone.
 
 The firmware keeps the onboard LED off except for a very short transmit blink.

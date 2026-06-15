@@ -295,11 +295,16 @@ def _maybe_send_server_done(path: Path, event: LaundryEvent, sender: PushMessage
     latest_quiet_at = _event_timestamp(latest_sample)
     if latest_quiet_at is None:
         return
-    active_indexes = [
-        index
-        for index, phase_info in enumerate(phases)
-        if phase_info["short"] in {"washer", "dryer", "strong", "gentle"}
-    ]
+    last_notification_received_at = _latest_notification_received_at(path, event.device_id)
+    active_indexes = []
+    for index, phase_info in enumerate(phases):
+        if phase_info["short"] not in {"washer", "dryer", "strong", "gentle"}:
+            continue
+        if last_notification_received_at is not None:
+            sample_received_at = _received_timestamp(samples[index])
+            if sample_received_at is None or sample_received_at <= last_notification_received_at:
+                continue
+        active_indexes.append(index)
     if not active_indexes:
         return
     first_active_at = _event_timestamp(samples[active_indexes[0]])
@@ -313,7 +318,7 @@ def _maybe_send_server_done(path: Path, event: LaundryEvent, sender: PushMessage
     if _has_notification_after(path, event.device_id, last_active_at):
         return
 
-    label = _server_done_label(phases)
+    label = _server_done_label(phases[active_indexes[0] :])
     notification = LaundryEvent(
         device_id=event.device_id,
         event_id=f"server-done-{event.device_id}-{latest_sample['event_id']}",
@@ -373,11 +378,39 @@ def _has_notification_after(path: Path, device_id: str, threshold: datetime) -> 
     return False
 
 
+def _latest_notification_received_at(path: Path, device_id: str) -> datetime | None:
+    with sqlite3.connect(path) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            """
+            SELECT raw_json, received_at
+            FROM events
+            WHERE state = 'done_sent'
+              AND device_id = ?
+              AND received_at >= datetime('now', ?)
+            ORDER BY received_at DESC, event_id DESC
+            LIMIT 1
+            """,
+            (device_id, f"-{EVENT_RETENTION_DAYS} days"),
+        ).fetchone()
+    if row is None:
+        return None
+    return _received_timestamp({"received_at": row["received_at"]})
+
+
 def _server_done_label(phases: list[dict]) -> str:
-    shorts = {phase["short"] for phase in phases}
-    if "strong" in shorts or "washer" in shorts:
+    active_shorts = [
+        phase["short"]
+        for phase in phases
+        if phase["short"] in {"washer", "dryer", "strong", "gentle"}
+    ]
+    dryer_count = active_shorts.count("dryer")
+    washer_like_count = active_shorts.count("washer") + active_shorts.count("strong")
+    if dryer_count > 0 and dryer_count >= washer_like_count:
+        return "dryer"
+    if washer_like_count > 0:
         return "washer"
-    if "dryer" in shorts:
+    if dryer_count > 0:
         return "dryer"
     return "stack"
 
@@ -542,6 +575,13 @@ def _event_timestamp(event: dict) -> datetime | None:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc)
+
+
+def _received_timestamp(event: dict) -> datetime | None:
+    received_at = event.get("received_at")
+    if not received_at:
+        return None
+    return _event_timestamp({"received_at": received_at})
 
 
 def _list_notification_events(path: Path, days: int = EVENT_RETENTION_DAYS) -> list[dict]:

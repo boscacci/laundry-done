@@ -36,11 +36,15 @@
 #endif
 
 #ifndef LAUNDRY_USE_LIGHT_SLEEP
-#define LAUNDRY_USE_LIGHT_SLEEP 0
+#define LAUNDRY_USE_LIGHT_SLEEP 1
 #endif
 
 #ifndef LAUNDRY_TRANSMIT_LED_BLINK_MS
 #define LAUNDRY_TRANSMIT_LED_BLINK_MS 35
+#endif
+
+#ifndef LAUNDRY_KEEPALIVE_WIFI_PULSE
+#define LAUNDRY_KEEPALIVE_WIFI_PULSE 1
 #endif
 
 namespace {
@@ -49,9 +53,7 @@ constexpr uint8_t kSdaPin = 21;
 constexpr uint8_t kSclPin = 22;
 constexpr unsigned long kSampleWindowMs = 4000;
 constexpr unsigned long kSampleIntervalMs = 40;
-constexpr unsigned long kRunningPollMs = 10000;
-constexpr unsigned long kBatteryKeepAwakeMs = 15UL * 60UL * 1000UL;
-constexpr unsigned long kBatteryKeepAwakePollMs = 10000;
+constexpr TelemetryCadenceConfig kTelemetryCadence{};
 
 struct WifiTarget {
   bool seen = false;
@@ -69,6 +71,7 @@ String boot_id;
 String telemetry_run_id;
 bool clock_configured = false;
 bool clock_synced = false;
+LaundryDetector telemetry_cadence_detector(telemetry_cadence_detector_config());
 
 enum class MotionSensor {
   None,
@@ -101,6 +104,38 @@ const char *motion_sensor_to_string(MotionSensor sensor) {
   case MotionSensor::None:
   default:
     return "none";
+  }
+}
+
+const char *detector_state_to_string(DetectorState state) {
+  switch (state) {
+  case DetectorState::Idle:
+    return "idle";
+  case DetectorState::MotionConfirming:
+    return "motion_confirming";
+  case DetectorState::CycleRunning:
+    return "cycle_running";
+  case DetectorState::QuietCandidate:
+    return "quiet_candidate";
+  case DetectorState::DoneSent:
+    return "done_sent";
+  default:
+    return "unknown";
+  }
+}
+
+const char *cycle_label_to_string(CycleLabel label) {
+  switch (label) {
+  case CycleLabel::Unknown:
+    return "unknown";
+  case CycleLabel::Washer:
+    return "washer";
+  case CycleLabel::Dryer:
+    return "dryer";
+  case CycleLabel::Stack:
+    return "stack";
+  default:
+    return "unknown";
   }
 }
 
@@ -331,7 +366,7 @@ void log_target_wifi_scan() {
 }
 
 bool battery_keep_awake_active() {
-  return millis() < kBatteryKeepAwakeMs;
+  return millis() < kTelemetryCadence.startup_keep_awake_ms;
 }
 
 void maybe_sleep_wifi() {
@@ -342,17 +377,52 @@ void maybe_sleep_wifi() {
   WiFi.mode(WIFI_OFF);
 }
 
+void power_bank_keepalive_pulse(unsigned long duration_ms, unsigned long remaining_after_ms) {
+  Serial.printf("battery_keepalive_pulse duration_ms=%lu remaining_after_ms=%lu mode=%s\n",
+                duration_ms,
+                remaining_after_ms,
+                LAUNDRY_KEEPALIVE_WIFI_PULSE ? "wifi_radio" : "active_delay");
+  Serial.flush();
+  digitalWrite(kLedPin, HIGH);
+#if LAUNDRY_KEEPALIVE_WIFI_PULSE
+  WiFi.persistent(false);
+  WiFi.mode(WIFI_STA);
+  WiFi.setSleep(false);
+#endif
+  delay(duration_ms);
+#if LAUNDRY_KEEPALIVE_WIFI_PULSE
+  WiFi.disconnect(true, true);
+  WiFi.mode(WIFI_OFF);
+#endif
+  digitalWrite(kLedPin, LOW);
+}
+
 void nap(unsigned long nap_ms) {
   if (nap_ms == 0) {
     return;
   }
 #if LAUNDRY_USE_LIGHT_SLEEP
-  Serial.printf("sleep mode=light duration_ms=%lu\n", nap_ms);
-  Serial.flush();
-  WiFi.mode(WIFI_OFF);
-  esp_sleep_enable_timer_wakeup(static_cast<uint64_t>(nap_ms) * 1000ULL);
-  esp_light_sleep_start();
+  unsigned long remaining_ms = nap_ms;
+  while (remaining_ms > 0) {
+    const BatteryKeepaliveNap slice =
+        next_battery_keepalive_nap(remaining_ms, kTelemetryCadence);
+    if (slice.sleep_ms > 0) {
+      Serial.printf("sleep mode=light duration_ms=%lu remaining_after_ms=%lu\n",
+                    slice.sleep_ms,
+                    slice.remaining_after_slice_ms + slice.awake_pulse_ms);
+      Serial.flush();
+      WiFi.mode(WIFI_OFF);
+      esp_sleep_enable_timer_wakeup(static_cast<uint64_t>(slice.sleep_ms) * 1000ULL);
+      esp_light_sleep_start();
+    }
+    if (slice.awake_pulse_ms > 0) {
+      power_bank_keepalive_pulse(slice.awake_pulse_ms, slice.remaining_after_slice_ms);
+    }
+    remaining_ms = slice.remaining_after_slice_ms;
+  }
 #else
+  Serial.printf("sleep mode=active_delay duration_ms=%lu\n", nap_ms);
+  Serial.flush();
   delay(nap_ms);
 #endif
 }
@@ -884,12 +954,16 @@ void setup() {
   boot_id = make_boot_id();
   Serial.printf("sensor_type=%s\n", motion_sensor_to_string(motion_sensor));
   telemetry_run_id = String("production-") + String(DEVICE_ID) + "-" + boot_id;
-  Serial.printf("telemetry_enabled=true run_id=%s sample_window_ms=%lu poll_ms=%lu battery_keep_awake_ms=%lu battery_keep_awake_poll_ms=%lu classifier=server\n",
+  Serial.printf("telemetry_enabled=true run_id=%s sample_window_ms=%lu poll_ms=%lu battery_keep_awake_ms=%lu battery_keep_awake_poll_ms=%lu idle_poll_ms=%lu battery_keepalive_interval_ms=%lu battery_keepalive_pulse_ms=%lu battery_keepalive_mode=%s classifier=server\n",
                 telemetry_run_id.c_str(),
                 kSampleWindowMs,
-                kRunningPollMs,
-                kBatteryKeepAwakeMs,
-                kBatteryKeepAwakePollMs);
+                kTelemetryCadence.running_poll_ms,
+                kTelemetryCadence.startup_keep_awake_ms,
+                kTelemetryCadence.startup_poll_ms,
+                kTelemetryCadence.idle_poll_ms,
+                kTelemetryCadence.battery_keepalive_interval_ms,
+                kTelemetryCadence.battery_keepalive_pulse_ms,
+                LAUNDRY_KEEPALIVE_WIFI_PULSE ? "wifi_radio" : "active_delay");
   Serial.println("sensor_detected=true");
 }
 
@@ -897,10 +971,13 @@ void loop() {
   const unsigned long sample_started_ms = millis();
   const time_t sample_epoch_seconds = time(nullptr);
   MotionWindow window = sample_motion_window();
+  Decision cadence_decision = telemetry_cadence_detector.observe(window);
 
-  Serial.printf("motion rms_mg=%.2f peak_mg=%.2f classification=server\n",
+  Serial.printf("motion rms_mg=%.2f peak_mg=%.2f telemetry_state=%s telemetry_label=%s classification=server\n",
                 window.rms_mg,
-                window.peak_mg);
+                window.peak_mg,
+                detector_state_to_string(cadence_decision.state),
+                cycle_label_to_string(cadence_decision.label));
 
   telemetry_counter++;
   const bool telemetry_ok = post_calibration_sample_event(
@@ -910,7 +987,10 @@ void loop() {
       sample_epoch_seconds);
   Serial.printf("telemetry_result ok=%s\n", telemetry_ok ? "true" : "false");
 
-  const unsigned long target_interval_ms = kRunningPollMs;
+  const unsigned long target_interval_ms = telemetry_poll_ms(
+      millis(),
+      cadence_decision.state,
+      kTelemetryCadence);
   unsigned long nap_ms = nap_duration_ms(sample_started_ms, millis(), target_interval_ms);
   const time_t now_epoch_seconds = time(nullptr);
   const bool wall_clock_aligned = clock_synced && clock_is_valid(now_epoch_seconds);

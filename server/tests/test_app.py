@@ -491,6 +491,105 @@ def test_server_classifies_readings_and_sends_done_notification(tmp_path):
     assert list_response.json()["notifications"][0]["title"] == "Washer done"
 
 
+def test_server_done_label_uses_current_cycle_after_previous_notification(tmp_path):
+    sent = []
+    database_path = tmp_path / "events.sqlite3"
+    app = create_app(
+        database_path=database_path,
+        device_secret="test-secret",
+        gotify_url="http://gotify.local",
+        gotify_app_token="token",
+        push_message=lambda message: sent.append(message),
+    )
+    client = TestClient(app)
+    washer_start = datetime.now(timezone.utc).replace(microsecond=0) - timedelta(hours=4)
+
+    for index in range(8):
+        response = _post(
+            client,
+            "test-secret",
+            _calibration_payload(
+                event_id=f"washer-active-{index}",
+                at=washer_start + timedelta(seconds=index * 10),
+                rms=32.0,
+                peak=75.0,
+            ),
+        )
+        assert response.status_code == 202
+
+    for index in range(67):
+        response = _post(
+            client,
+            "test-secret",
+            _calibration_payload(
+                event_id=f"washer-quiet-{index}",
+                at=washer_start + timedelta(seconds=80 + index * 10),
+                rms=0.8,
+                peak=2.0,
+            ),
+        )
+        assert response.status_code == 202
+
+    assert sent == [
+        {
+            "title": "Washer done",
+            "message": "No washer motion for 10 min.",
+            "priority": 5,
+        }
+    ]
+    with sqlite3.connect(database_path) as conn:
+        conn.execute(
+            """
+            UPDATE events
+            SET received_at = ?
+            WHERE event_id LIKE 'washer-active-%'
+               OR event_id LIKE 'washer-quiet-%'
+            """,
+            (_utc_text(washer_start),),
+        )
+        conn.execute(
+            "UPDATE events SET received_at = ? WHERE state = 'done_sent'",
+            (_utc_text(washer_start + timedelta(minutes=13)),),
+        )
+    sent.clear()
+
+    dryer_start = washer_start + timedelta(hours=2)
+    dryer_readings = [(27.9, 69.6)] + [(24.0, 50.0)] * 15
+    for index, (rms, peak) in enumerate(dryer_readings):
+        response = _post(
+            client,
+            "test-secret",
+            _calibration_payload(
+                event_id=f"dryer-active-{index}",
+                at=dryer_start + timedelta(seconds=index * 10),
+                rms=rms,
+                peak=peak,
+            ),
+        )
+        assert response.status_code == 202
+
+    for index in range(67):
+        response = _post(
+            client,
+            "test-secret",
+            _calibration_payload(
+                event_id=f"dryer-quiet-{index}",
+                at=dryer_start + timedelta(seconds=len(dryer_readings) * 10 + index * 10),
+                rms=0.8,
+                peak=2.0,
+            ),
+        )
+        assert response.status_code == 202
+
+    assert sent == [
+        {
+            "title": "Dryer done",
+            "message": "No dryer motion for 10 min.",
+            "priority": 5,
+        }
+    ]
+
+
 def test_calibration_listing_can_filter_handling_noise_by_peak(tmp_path):
     app = create_app(
         database_path=tmp_path / "events.sqlite3",

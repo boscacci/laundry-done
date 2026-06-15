@@ -39,9 +39,13 @@ The ESP32 signs each event with an HMAC secret before sending it to the relay.
 The relay rejects unsigned traffic, stores calibration samples locally, and asks
 Gotify to notify your phone for finished-cycle events.
 
-The current production firmware keeps a 10-second telemetry cadence while it is
-awake, uses NTP timestamps when Wi-Fi is available, and keeps the onboard LED off
-except for a tiny blink when transmitting.
+The current production firmware uses a 10-second cadence for the first 10
+minutes after boot, then drops to a 30-second idle heartbeat with Wi-Fi off
+between posts when the machine is quiet. Long idle waits use light sleep but
+wake every 15 seconds for a 2.5-second Wi-Fi-radio keep-alive pulse. It returns
+to a 10-second cadence during motion and the done-confirmation quiet window,
+uses NTP timestamps when Wi-Fi is available, and keeps the onboard LED off
+except while transmitting or pulsing the power-bank keepalive.
 
 ## Documentation Map
 

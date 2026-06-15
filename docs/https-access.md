@@ -28,32 +28,32 @@ authentication layer.
 
 ## Runtime Shape
 
-Caddy terminates HTTPS locally and renews the certificate with Route53 DNS-01:
+Caddy terminates HTTPS locally for the laundry and Gotify hostnames and renews
+those certificates with Route53 DNS-01:
 
 ```bash
 docker compose up -d --build caddy
 ```
 
-Tailscale forwards tailnet TCP port 443 to that local Caddy listener:
+The Optiplex tailnet `80/443` front door is shared with other private services.
+The live front door is the host-network `vhf-dev-tailnet-proxy` nginx container,
+configured in:
 
 ```bash
-tailscale funnel --https=443 off
-tailscale serve --bg --yes --tcp=80 tcp://127.0.0.1:8081
-tailscale serve --bg --yes --tcp=443 tcp://127.0.0.1:8444
+/home/rob/vhf-dev-proxy/nginx.conf
 ```
 
-Expected status:
+It routes by SNI:
 
 ```text
-|-- tcp://optiplex.<tailnet>.ts.net:80 (TCP, tailnet only)
-|--> tcp://127.0.0.1:8081
-|-- tcp://optiplex.<tailnet>.ts.net:443 (TLS over TCP, tailnet only)
-|--> tcp://127.0.0.1:8444
+gotify.robertboscacci.com   -> 127.0.0.1:8444  # Caddy TLS passthrough
+laundry.robertboscacci.com  -> 127.0.0.1:8444  # Caddy TLS passthrough
+vhf-dev.robertboscacci.com  -> 127.0.0.1:9443  # nginx TLS termination
 ```
 
-Port 80 exists only to catch accidental `http://` browser visits and let Caddy
-redirect them to HTTPS. Without this tailnet-only forward, plain HTTP reaches
-Pi-hole on the host and shows Pi-hole's access-denied page.
+Port 80 exists only to catch accidental `http://` browser visits and redirect
+them to HTTPS. Without this host-network front door, plain HTTP can reach
+Pi-hole on the host and show Pi-hole's access-denied page.
 
 ## Warm-Up Worker
 

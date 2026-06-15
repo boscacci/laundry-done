@@ -264,15 +264,15 @@ void test_motion_trigger_enforces_cooldown_after_posting() {
 }
 
 void test_startup_keep_awake_uses_short_idle_poll_during_manual_battery_wake_window() {
-  const unsigned long keep_awake_ms = 15UL * 60UL * 1000UL;
+  const unsigned long keep_awake_ms = 10UL * 60UL * 1000UL;
   const unsigned long keep_awake_poll_ms = 10000UL;
-  const unsigned long idle_poll_ms = 60000UL;
+  const unsigned long idle_poll_ms = 30UL * 1000UL;
   const unsigned long running_poll_ms = 10000UL;
 
   TEST_ASSERT_EQUAL(
       keep_awake_poll_ms,
       telemetry_poll_ms(
-          10UL * 60UL * 1000UL,
+          9UL * 60UL * 1000UL,
           DetectorState::Idle,
           keep_awake_ms,
           keep_awake_poll_ms,
@@ -281,7 +281,7 @@ void test_startup_keep_awake_uses_short_idle_poll_during_manual_battery_wake_win
   TEST_ASSERT_EQUAL(
       keep_awake_poll_ms,
       telemetry_poll_ms(
-          10UL * 60UL * 1000UL,
+          9UL * 60UL * 1000UL,
           DetectorState::DoneSent,
           keep_awake_ms,
           keep_awake_poll_ms,
@@ -290,7 +290,7 @@ void test_startup_keep_awake_uses_short_idle_poll_during_manual_battery_wake_win
   TEST_ASSERT_EQUAL(
       idle_poll_ms,
       telemetry_poll_ms(
-          16UL * 60UL * 1000UL,
+          10UL * 60UL * 1000UL + 1UL,
           DetectorState::Idle,
           keep_awake_ms,
           keep_awake_poll_ms,
@@ -305,6 +305,77 @@ void test_startup_keep_awake_uses_short_idle_poll_during_manual_battery_wake_win
           keep_awake_poll_ms,
           idle_poll_ms,
           running_poll_ms));
+}
+
+void test_default_telemetry_cadence_uses_power_bank_friendly_idle_heartbeat() {
+  const TelemetryCadenceConfig config;
+
+  TEST_ASSERT_EQUAL(10UL * 60UL * 1000UL, config.startup_keep_awake_ms);
+  TEST_ASSERT_EQUAL(10UL * 1000UL, config.startup_poll_ms);
+  TEST_ASSERT_EQUAL(30UL * 1000UL, config.idle_poll_ms);
+  TEST_ASSERT_EQUAL(10UL * 1000UL, config.running_poll_ms);
+  TEST_ASSERT_EQUAL(15UL * 1000UL, config.battery_keepalive_interval_ms);
+  TEST_ASSERT_EQUAL(2500UL, config.battery_keepalive_pulse_ms);
+
+  TEST_ASSERT_EQUAL(
+      config.startup_poll_ms,
+      telemetry_poll_ms(9UL * 60UL * 1000UL, DetectorState::Idle, config));
+  TEST_ASSERT_EQUAL(
+      config.idle_poll_ms,
+      telemetry_poll_ms(10UL * 60UL * 1000UL + 1UL, DetectorState::Idle, config));
+  TEST_ASSERT_EQUAL(
+      config.running_poll_ms,
+      telemetry_poll_ms(10UL * 60UL * 1000UL, DetectorState::QuietCandidate, config));
+}
+
+void test_battery_keepalive_splits_long_idle_nap_with_awake_pulse() {
+  const TelemetryCadenceConfig config;
+
+  BatteryKeepaliveNap first = next_battery_keepalive_nap(30UL * 1000UL, config);
+  TEST_ASSERT_EQUAL(15UL * 1000UL, first.sleep_ms);
+  TEST_ASSERT_EQUAL(2500UL, first.awake_pulse_ms);
+  TEST_ASSERT_EQUAL(12500UL, first.remaining_after_slice_ms);
+
+  BatteryKeepaliveNap second = next_battery_keepalive_nap(
+      first.remaining_after_slice_ms,
+      config);
+  TEST_ASSERT_EQUAL(12500UL, second.sleep_ms);
+  TEST_ASSERT_EQUAL(0UL, second.awake_pulse_ms);
+  TEST_ASSERT_EQUAL(0UL, second.remaining_after_slice_ms);
+}
+
+void test_battery_keepalive_does_not_split_short_running_nap() {
+  const TelemetryCadenceConfig config;
+
+  BatteryKeepaliveNap slice = next_battery_keepalive_nap(10UL * 1000UL, config);
+  TEST_ASSERT_EQUAL(10UL * 1000UL, slice.sleep_ms);
+  TEST_ASSERT_EQUAL(0UL, slice.awake_pulse_ms);
+  TEST_ASSERT_EQUAL(0UL, slice.remaining_after_slice_ms);
+}
+
+void test_cadence_detector_returns_to_idle_after_single_handling_jolt() {
+  LaundryDetector detector(telemetry_cadence_detector_config());
+  const TelemetryCadenceConfig cadence;
+
+  Decision jolt = detector.observe(MotionWindow{0, 4, 52.0f, 510.0f});
+  TEST_ASSERT_EQUAL(DetectorState::MotionConfirming, jolt.state);
+  TEST_ASSERT_EQUAL(cadence.running_poll_ms, telemetry_poll_ms(0, jolt.state, cadence));
+
+  Decision quiet_again = detector.observe(quiet(30UL * 1000UL));
+  TEST_ASSERT_EQUAL(DetectorState::Idle, quiet_again.state);
+  TEST_ASSERT_EQUAL(
+      cadence.idle_poll_ms,
+      telemetry_poll_ms(cadence.startup_keep_awake_ms + 1UL, quiet_again.state, cadence));
+}
+
+void test_cadence_detector_treats_quiet_washer_motion_as_active_for_sampling() {
+  LaundryDetector detector(telemetry_cadence_detector_config());
+
+  Decision gentle_start = detector.observe(MotionWindow{0, 4, 2.46f, 4.69f});
+  TEST_ASSERT_EQUAL(DetectorState::MotionConfirming, gentle_start.state);
+
+  Decision confirmed = detector.observe(MotionWindow{30UL * 1000UL + 1UL, 4, 3.01f, 5.35f});
+  TEST_ASSERT_EQUAL(DetectorState::CycleRunning, confirmed.state);
 }
 
 void test_nap_duration_keeps_sample_start_cadence_near_target_interval() {
@@ -335,6 +406,11 @@ int main(int argc, char **argv) {
   RUN_TEST(test_motion_trigger_resets_when_motion_drops_before_confirmation);
   RUN_TEST(test_motion_trigger_enforces_cooldown_after_posting);
   RUN_TEST(test_startup_keep_awake_uses_short_idle_poll_during_manual_battery_wake_window);
+  RUN_TEST(test_default_telemetry_cadence_uses_power_bank_friendly_idle_heartbeat);
+  RUN_TEST(test_battery_keepalive_splits_long_idle_nap_with_awake_pulse);
+  RUN_TEST(test_battery_keepalive_does_not_split_short_running_nap);
+  RUN_TEST(test_cadence_detector_returns_to_idle_after_single_handling_jolt);
+  RUN_TEST(test_cadence_detector_treats_quiet_washer_motion_as_active_for_sampling);
   RUN_TEST(test_nap_duration_keeps_sample_start_cadence_near_target_interval);
   RUN_TEST(test_aligned_wall_clock_nap_targets_next_interval_boundary);
   return UNITY_END();

@@ -53,7 +53,7 @@ Decision LaundryDetector::observe(const MotionWindow &window) {
       if (elapsed(classified_window.at_ms, cycle_started_ms_) >= config_.confirm_motion_ms) {
         state_ = DetectorState::CycleRunning;
       }
-    } else if (elapsed(classified_window.at_ms, cycle_started_ms_) < config_.confirm_motion_ms) {
+    } else {
       reset();
     }
     break;
@@ -213,6 +213,26 @@ void LaundryDetector::note_motion(const MotionWindow &window) {
   }
 }
 
+DetectorConfig telemetry_cadence_detector_config() {
+  DetectorConfig config;
+  config.active_threshold_mg = 2.0f;
+  config.active_peak_threshold_mg = 4.5f;
+  config.classification_smoothing_samples = 1;
+  config.confirm_motion_ms = 30UL * 1000UL;
+  return config;
+}
+
+unsigned long telemetry_poll_ms(unsigned long now_ms,
+                                DetectorState state,
+                                const TelemetryCadenceConfig &config) {
+  return telemetry_poll_ms(now_ms,
+                           state,
+                           config.startup_keep_awake_ms,
+                           config.startup_poll_ms,
+                           config.idle_poll_ms,
+                           config.running_poll_ms);
+}
+
 unsigned long telemetry_poll_ms(unsigned long now_ms,
                                 DetectorState state,
                                 unsigned long startup_keep_awake_ms,
@@ -228,6 +248,29 @@ unsigned long telemetry_poll_ms(unsigned long now_ms,
     return idle_poll_ms;
   }
   return running_poll_ms;
+}
+
+BatteryKeepaliveNap next_battery_keepalive_nap(unsigned long remaining_nap_ms,
+                                               const TelemetryCadenceConfig &config) {
+  if (remaining_nap_ms == 0) {
+    return BatteryKeepaliveNap{};
+  }
+  if (config.battery_keepalive_interval_ms == 0 ||
+      remaining_nap_ms <= config.battery_keepalive_interval_ms) {
+    return BatteryKeepaliveNap{remaining_nap_ms, 0, 0};
+  }
+
+  const unsigned long remaining_after_sleep =
+      remaining_nap_ms - config.battery_keepalive_interval_ms;
+  const unsigned long pulse_ms =
+      config.battery_keepalive_pulse_ms > remaining_after_sleep
+          ? remaining_after_sleep
+          : config.battery_keepalive_pulse_ms;
+  return BatteryKeepaliveNap{
+      config.battery_keepalive_interval_ms,
+      pulse_ms,
+      remaining_after_sleep - pulse_ms,
+  };
 }
 
 unsigned long nap_duration_ms(unsigned long sample_started_ms,

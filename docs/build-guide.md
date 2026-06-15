@@ -247,10 +247,15 @@ stopped-machine logs.
 The production firmware also posts dashboard telemetry as `calibration_sample`
 events. These samples feed `/monitor` but do not create Gotify phone
 notifications. Production firmware samples a 4-second motion window, then uses
-NTP to align the next sample to the next wall-clock 10-second boundary (`:00`,
-`:10`, `:20`, `:30`, `:40`, `:50`). It includes an NTP-backed
-`device_time_utc` field in telemetry payloads; the relay receive time remains as
-a fallback.
+a battery-aware cadence: 10-second samples for the first 10 minutes after boot,
+30-second samples while idle/quiet, and 10-second samples again while motion or
+the done-confirmation quiet window is active. The ESP32 uses a cadence-only
+motion detector that is intentionally more sensitive than the relay
+notification classifier, so quiet washer movement keeps the board in fast
+sampling without directly creating phone alerts. When NTP is available, the next
+sample is aligned to the cadence boundary. It includes an NTP-backed
+`device_time_utc` field in telemetry payloads; the relay receive time remains
+as a fallback.
 
 The dashboard labels vibration in `mg`, which means milli-g: thousandths of
 Earth gravity. A reading of `300 mg` is `0.3 g`. The monitor hides samples whose
@@ -259,14 +264,15 @@ or touching the sensor rather than washer/dryer rhythm. Classification happens
 on the relay, not on the ESP32: the sensor sends signed readings, and the relay
 uses smoothed recent readings to decide phase labels and Gotify alerts.
 
-By default the production firmware keeps light sleep disabled because some USB
-power banks shut off when the ESP32 draw drops too low. The controllable onboard
-LED stays off except for a tiny transmit blink. For manual battery-bank starts,
-the firmware keeps Wi-Fi connected and polls every few seconds for the first 15
-minutes after boot, which gives quiet washer fill/soak phases time to become
-real machine motion before the battery bank decides to shut down. The dashboard
-filters this handling noise before applying the visible sample limit, so a few
-large bumps do not empty the live chart.
+By default the production firmware uses ESP32 light sleep between samples, but
+long waits are split into shorter sleep slices so the USB battery bank does not
+auto-off. During a 30-second idle heartbeat, the ESP32 sleeps for 15 seconds,
+wakes for a 2.5-second Wi-Fi-radio keep-alive pulse, then finishes the remaining
+wait. The firmware turns Wi-Fi off between transmissions after the startup
+window and returns to 10-second sampling when it sees machine motion. The
+controllable onboard LED stays off except for transmit blinks and keep-alive
+pulses. Dashboard filters handling noise before applying the visible sample
+limit, so a few large bumps do not empty the live chart.
 
 ## 8. Expected Alerts
 
