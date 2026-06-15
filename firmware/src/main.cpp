@@ -71,6 +71,7 @@ String boot_id;
 String telemetry_run_id;
 bool clock_configured = false;
 bool clock_synced = false;
+unsigned long last_active_load_pulse_ms = 0;
 LaundryDetector telemetry_cadence_detector(telemetry_cadence_detector_config());
 
 enum class MotionSensor {
@@ -383,18 +384,51 @@ void power_bank_keepalive_pulse(unsigned long duration_ms, unsigned long remaini
                 remaining_after_ms,
                 LAUNDRY_KEEPALIVE_WIFI_PULSE ? "wifi_radio" : "active_delay");
   Serial.flush();
+  const unsigned long started_ms = millis();
   digitalWrite(kLedPin, HIGH);
 #if LAUNDRY_KEEPALIVE_WIFI_PULSE
   WiFi.persistent(false);
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(false);
+  if (duration_ms >= 5000UL) {
+    const int network_count = WiFi.scanNetworks(false, true);
+    Serial.printf("battery_keepalive_scan count=%d elapsed_ms=%lu\n",
+                  network_count,
+                  millis() - started_ms);
+    WiFi.scanDelete();
+  }
 #endif
-  delay(duration_ms);
+  const unsigned long elapsed_ms = millis() - started_ms;
+  if (elapsed_ms < duration_ms) {
+    delay(duration_ms - elapsed_ms);
+  }
 #if LAUNDRY_KEEPALIVE_WIFI_PULSE
   WiFi.disconnect(true, true);
   WiFi.mode(WIFI_OFF);
 #endif
   digitalWrite(kLedPin, LOW);
+}
+
+void maybe_active_cycle_load_pulse(DetectorState state, unsigned long *nap_ms) {
+  const unsigned long pulse_ms = active_cycle_load_pulse_ms(
+      millis(),
+      state,
+      last_active_load_pulse_ms,
+      kTelemetryCadence);
+  if (pulse_ms == 0) {
+    return;
+  }
+
+  const unsigned long remaining_after_ms = *nap_ms > pulse_ms ? *nap_ms - pulse_ms : 0;
+  Serial.printf("active_cycle_load_pulse state=%s interval_ms=%lu pulse_ms=%lu nap_before_ms=%lu remaining_after_ms=%lu\n",
+                detector_state_to_string(state),
+                kTelemetryCadence.active_load_pulse_interval_ms,
+                pulse_ms,
+                *nap_ms,
+                remaining_after_ms);
+  power_bank_keepalive_pulse(pulse_ms, remaining_after_ms);
+  last_active_load_pulse_ms = millis();
+  *nap_ms = remaining_after_ms;
 }
 
 void nap(unsigned long nap_ms) {
@@ -954,7 +988,7 @@ void setup() {
   boot_id = make_boot_id();
   Serial.printf("sensor_type=%s\n", motion_sensor_to_string(motion_sensor));
   telemetry_run_id = String("production-") + String(DEVICE_ID) + "-" + boot_id;
-  Serial.printf("telemetry_enabled=true run_id=%s sample_window_ms=%lu poll_ms=%lu battery_keep_awake_ms=%lu battery_keep_awake_poll_ms=%lu idle_poll_ms=%lu battery_keepalive_interval_ms=%lu battery_keepalive_pulse_ms=%lu battery_keepalive_mode=%s classifier=server\n",
+  Serial.printf("telemetry_enabled=true run_id=%s sample_window_ms=%lu poll_ms=%lu battery_keep_awake_ms=%lu battery_keep_awake_poll_ms=%lu idle_poll_ms=%lu battery_keepalive_interval_ms=%lu battery_keepalive_pulse_ms=%lu active_load_pulse_interval_ms=%lu active_load_pulse_ms=%lu battery_keepalive_mode=%s classifier=server\n",
                 telemetry_run_id.c_str(),
                 kSampleWindowMs,
                 kTelemetryCadence.running_poll_ms,
@@ -963,6 +997,8 @@ void setup() {
                 kTelemetryCadence.idle_poll_ms,
                 kTelemetryCadence.battery_keepalive_interval_ms,
                 kTelemetryCadence.battery_keepalive_pulse_ms,
+                kTelemetryCadence.active_load_pulse_interval_ms,
+                kTelemetryCadence.active_load_pulse_ms,
                 LAUNDRY_KEEPALIVE_WIFI_PULSE ? "wifi_radio" : "active_delay");
   Serial.println("sensor_detected=true");
 }
@@ -1004,6 +1040,7 @@ void loop() {
                 nap_ms,
                 wall_clock_aligned ? "true" : "false",
                 battery_keep_awake_active() ? "true" : "false");
+  maybe_active_cycle_load_pulse(cadence_decision.state, &nap_ms);
   nap(nap_ms);
 }
 

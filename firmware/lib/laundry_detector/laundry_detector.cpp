@@ -273,6 +273,22 @@ BatteryKeepaliveNap next_battery_keepalive_nap(unsigned long remaining_nap_ms,
   };
 }
 
+unsigned long active_cycle_load_pulse_ms(unsigned long now_ms,
+                                         DetectorState state,
+                                         unsigned long last_pulse_ms,
+                                         const TelemetryCadenceConfig &config) {
+  if (config.active_load_pulse_interval_ms == 0 || config.active_load_pulse_ms == 0) {
+    return 0;
+  }
+  if (state == DetectorState::Idle || state == DetectorState::DoneSent) {
+    return 0;
+  }
+  if (now_ms - last_pulse_ms < config.active_load_pulse_interval_ms) {
+    return 0;
+  }
+  return config.active_load_pulse_ms;
+}
+
 unsigned long nap_duration_ms(unsigned long sample_started_ms,
                               unsigned long now_ms,
                               unsigned long target_interval_ms) {

@@ -52,6 +52,8 @@ struct TelemetryCadenceConfig {
   unsigned long running_poll_ms = 10UL * 1000UL;
   unsigned long battery_keepalive_interval_ms = 15UL * 1000UL;
   unsigned long battery_keepalive_pulse_ms = 2500UL;
+  unsigned long active_load_pulse_interval_ms = 25UL * 1000UL;
+  unsigned long active_load_pulse_ms = 8000UL;
 };
 
 struct BatteryKeepaliveNap {
@@ -141,6 +143,11 @@ unsigned long telemetry_poll_ms(unsigned long now_ms,
 
 BatteryKeepaliveNap next_battery_keepalive_nap(unsigned long remaining_nap_ms,
                                                const TelemetryCadenceConfig &config);
+
+unsigned long active_cycle_load_pulse_ms(unsigned long now_ms,
+                                         DetectorState state,
+                                         unsigned long last_pulse_ms,
+                                         const TelemetryCadenceConfig &config);
 
 unsigned long nap_duration_ms(unsigned long sample_started_ms,
                               unsigned long now_ms,

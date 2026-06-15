@@ -298,7 +298,9 @@ For the current battery-bank-friendly setup:
    seconds for the first 10 minutes, then uses a 30-second idle heartbeat with
    Wi-Fi off between posts. During that idle heartbeat, it wakes every 15
    seconds for a 2.5-second Wi-Fi-radio keep-alive pulse so the USB battery bank
-   does not auto-off. It returns to 10-second samples when it sees motion.
+   does not auto-off. It returns to 10-second samples when it sees motion, and
+   active cycles run an 8-second Wi-Fi scan/radio load pulse every 25 seconds to
+   stay below the measured sub-40-second HyperGear no-load cutoff.
 4. Move laundry when Gotify notifies your phone.
 
 The firmware keeps the onboard LED off except for a very short transmit blink.
