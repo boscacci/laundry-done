@@ -307,17 +307,18 @@ void test_startup_keep_awake_uses_short_idle_poll_during_manual_battery_wake_win
           running_poll_ms));
 }
 
-void test_default_telemetry_cadence_uses_power_bank_friendly_idle_heartbeat() {
+void test_default_telemetry_cadence_lets_power_bank_auto_off_when_idle() {
   const TelemetryCadenceConfig config;
 
   TEST_ASSERT_EQUAL(10UL * 60UL * 1000UL, config.startup_keep_awake_ms);
   TEST_ASSERT_EQUAL(10UL * 1000UL, config.startup_poll_ms);
-  TEST_ASSERT_EQUAL(30UL * 1000UL, config.idle_poll_ms);
+  TEST_ASSERT_EQUAL(2UL * 60UL * 1000UL, config.idle_poll_ms);
   TEST_ASSERT_EQUAL(10UL * 1000UL, config.running_poll_ms);
   TEST_ASSERT_EQUAL(15UL * 1000UL, config.battery_keepalive_interval_ms);
   TEST_ASSERT_EQUAL(2500UL, config.battery_keepalive_pulse_ms);
   TEST_ASSERT_EQUAL(25UL * 1000UL, config.active_load_pulse_interval_ms);
   TEST_ASSERT_EQUAL(8000UL, config.active_load_pulse_ms);
+  TEST_ASSERT_TRUE(config.idle_poll_ms > 40UL * 1000UL);
   TEST_ASSERT_TRUE(config.active_load_pulse_interval_ms < 40UL * 1000UL);
 
   TEST_ASSERT_EQUAL(
@@ -329,6 +330,62 @@ void test_default_telemetry_cadence_uses_power_bank_friendly_idle_heartbeat() {
   TEST_ASSERT_EQUAL(
       config.running_poll_ms,
       telemetry_poll_ms(10UL * 60UL * 1000UL, DetectorState::QuietCandidate, config));
+}
+
+void test_idle_and_done_naps_do_not_pulse_after_startup_keep_awake_window() {
+  const TelemetryCadenceConfig config;
+
+  TEST_ASSERT_FALSE(battery_keepalive_allowed(
+      config.startup_keep_awake_ms + 1UL,
+      DetectorState::Idle,
+      config));
+  TEST_ASSERT_FALSE(battery_keepalive_allowed(
+      config.startup_keep_awake_ms + 1UL,
+      DetectorState::DoneSent,
+      config));
+
+  BatteryKeepaliveNap idle = next_battery_keepalive_nap(
+      config.idle_poll_ms,
+      config.startup_keep_awake_ms + 1UL,
+      DetectorState::Idle,
+      config);
+  TEST_ASSERT_EQUAL(config.idle_poll_ms, idle.sleep_ms);
+  TEST_ASSERT_EQUAL(0UL, idle.awake_pulse_ms);
+  TEST_ASSERT_EQUAL(0UL, idle.remaining_after_slice_ms);
+
+  BatteryKeepaliveNap done = next_battery_keepalive_nap(
+      config.idle_poll_ms,
+      config.startup_keep_awake_ms + 1UL,
+      DetectorState::DoneSent,
+      config);
+  TEST_ASSERT_EQUAL(config.idle_poll_ms, done.sleep_ms);
+  TEST_ASSERT_EQUAL(0UL, done.awake_pulse_ms);
+  TEST_ASSERT_EQUAL(0UL, done.remaining_after_slice_ms);
+}
+
+void test_running_and_quiet_candidate_naps_still_keep_power_bank_awake() {
+  const TelemetryCadenceConfig config;
+  const unsigned long long_running_nap_ms = 30UL * 1000UL;
+
+  TEST_ASSERT_TRUE(battery_keepalive_allowed(
+      config.startup_keep_awake_ms + 1UL,
+      DetectorState::CycleRunning,
+      config));
+  TEST_ASSERT_TRUE(battery_keepalive_allowed(
+      config.startup_keep_awake_ms + 1UL,
+      DetectorState::QuietCandidate,
+      config));
+
+  BatteryKeepaliveNap running = next_battery_keepalive_nap(
+      long_running_nap_ms,
+      config.startup_keep_awake_ms + 1UL,
+      DetectorState::CycleRunning,
+      config);
+  TEST_ASSERT_EQUAL(config.battery_keepalive_interval_ms, running.sleep_ms);
+  TEST_ASSERT_EQUAL(config.battery_keepalive_pulse_ms, running.awake_pulse_ms);
+  TEST_ASSERT_EQUAL(
+      long_running_nap_ms - config.battery_keepalive_interval_ms - config.battery_keepalive_pulse_ms,
+      running.remaining_after_slice_ms);
 }
 
 void test_active_cycle_load_pulse_runs_before_forty_second_power_bank_cutoff() {
@@ -454,7 +511,9 @@ int main(int argc, char **argv) {
   RUN_TEST(test_motion_trigger_resets_when_motion_drops_before_confirmation);
   RUN_TEST(test_motion_trigger_enforces_cooldown_after_posting);
   RUN_TEST(test_startup_keep_awake_uses_short_idle_poll_during_manual_battery_wake_window);
-  RUN_TEST(test_default_telemetry_cadence_uses_power_bank_friendly_idle_heartbeat);
+  RUN_TEST(test_default_telemetry_cadence_lets_power_bank_auto_off_when_idle);
+  RUN_TEST(test_idle_and_done_naps_do_not_pulse_after_startup_keep_awake_window);
+  RUN_TEST(test_running_and_quiet_candidate_naps_still_keep_power_bank_awake);
   RUN_TEST(test_active_cycle_load_pulse_runs_before_forty_second_power_bank_cutoff);
   RUN_TEST(test_active_cycle_load_pulse_skips_idle_and_done_states);
   RUN_TEST(test_battery_keepalive_splits_long_idle_nap_with_awake_pulse);

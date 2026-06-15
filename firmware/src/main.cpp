@@ -431,7 +431,7 @@ void maybe_active_cycle_load_pulse(DetectorState state, unsigned long *nap_ms) {
   *nap_ms = remaining_after_ms;
 }
 
-void nap(unsigned long nap_ms) {
+void nap(unsigned long nap_ms, DetectorState state) {
   if (nap_ms == 0) {
     return;
   }
@@ -439,7 +439,7 @@ void nap(unsigned long nap_ms) {
   unsigned long remaining_ms = nap_ms;
   while (remaining_ms > 0) {
     const BatteryKeepaliveNap slice =
-        next_battery_keepalive_nap(remaining_ms, kTelemetryCadence);
+        next_battery_keepalive_nap(remaining_ms, millis(), state, kTelemetryCadence);
     if (slice.sleep_ms > 0) {
       Serial.printf("sleep mode=light duration_ms=%lu remaining_after_ms=%lu\n",
                     slice.sleep_ms,
@@ -1035,13 +1035,14 @@ void loop() {
         static_cast<long>(now_epoch_seconds),
         target_interval_ms);
   }
-  Serial.printf("target_interval_ms=%lu next_nap_ms=%lu wall_clock_aligned=%s battery_keep_awake=%s classifier=server\n",
+  Serial.printf("target_interval_ms=%lu next_nap_ms=%lu wall_clock_aligned=%s battery_keep_awake=%s battery_keepalive_allowed=%s classifier=server\n",
                 target_interval_ms,
                 nap_ms,
                 wall_clock_aligned ? "true" : "false",
-                battery_keep_awake_active() ? "true" : "false");
+                battery_keep_awake_active() ? "true" : "false",
+                battery_keepalive_allowed(millis(), cadence_decision.state, kTelemetryCadence) ? "true" : "false");
   maybe_active_cycle_load_pulse(cadence_decision.state, &nap_ms);
-  nap(nap_ms);
+  nap(nap_ms, cadence_decision.state);
 }
 
 #endif

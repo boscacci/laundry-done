@@ -40,14 +40,15 @@ The relay rejects unsigned traffic, stores calibration samples locally, and asks
 Gotify to notify your phone for finished-cycle events.
 
 The current production firmware uses a 10-second cadence for the first 10
-minutes after boot, then drops to a 30-second idle heartbeat with Wi-Fi off
-between posts when the machine is quiet. Long idle waits use light sleep but
-wake every 15 seconds for a 2.5-second Wi-Fi-radio keep-alive pulse. It returns
-to a 10-second cadence during motion and the done-confirmation quiet window,
-and active cycles run an 8-second Wi-Fi scan/radio load pulse every 25 seconds
-to stay below the measured sub-40-second HyperGear no-load cutoff. It uses NTP
-timestamps when Wi-Fi is available, and keeps the onboard LED off except while
-transmitting or pulsing the power-bank keepalive.
+minutes after boot so a freshly woken USB power bank stays alive while you start
+the washer or dryer. After that, idle/done states use a 2-minute light-sleep nap
+with no keep-alive pulse, which lets the HyperGear bank auto-off instead of
+running forever after laundry is finished. It returns to a 10-second cadence
+during motion and the done-confirmation quiet window, and active cycles run an
+8-second Wi-Fi scan/radio load pulse every 25 seconds to stay below the measured
+sub-40-second HyperGear no-load cutoff. It uses NTP timestamps when Wi-Fi is
+available, and keeps the onboard LED off except while transmitting or pulsing
+the power-bank keepalive.
 
 ## Documentation Map
 

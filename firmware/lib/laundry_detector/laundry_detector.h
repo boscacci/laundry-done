@@ -48,7 +48,7 @@ struct Decision {
 struct TelemetryCadenceConfig {
   unsigned long startup_keep_awake_ms = 10UL * 60UL * 1000UL;
   unsigned long startup_poll_ms = 10UL * 1000UL;
-  unsigned long idle_poll_ms = 30UL * 1000UL;
+  unsigned long idle_poll_ms = 2UL * 60UL * 1000UL;
   unsigned long running_poll_ms = 10UL * 1000UL;
   unsigned long battery_keepalive_interval_ms = 15UL * 1000UL;
   unsigned long battery_keepalive_pulse_ms = 2500UL;
@@ -142,6 +142,15 @@ unsigned long telemetry_poll_ms(unsigned long now_ms,
                                 unsigned long running_poll_ms);
 
 BatteryKeepaliveNap next_battery_keepalive_nap(unsigned long remaining_nap_ms,
+                                               const TelemetryCadenceConfig &config);
+
+bool battery_keepalive_allowed(unsigned long now_ms,
+                               DetectorState state,
+                               const TelemetryCadenceConfig &config);
+
+BatteryKeepaliveNap next_battery_keepalive_nap(unsigned long remaining_nap_ms,
+                                               unsigned long now_ms,
+                                               DetectorState state,
                                                const TelemetryCadenceConfig &config);
 
 unsigned long active_cycle_load_pulse_ms(unsigned long now_ms,

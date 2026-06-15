@@ -248,15 +248,16 @@ The production firmware also posts dashboard telemetry as `calibration_sample`
 events. These samples feed `/monitor` but do not create Gotify phone
 notifications. Production firmware samples a 4-second motion window, then uses
 a battery-aware cadence: 10-second samples for the first 10 minutes after boot,
-30-second samples while idle/quiet, and 10-second samples again while motion or
-the done-confirmation quiet window is active. The ESP32 uses a cadence-only
-motion detector that is intentionally more sensitive than the relay
-notification classifier, so quiet washer movement keeps the board in fast
-sampling without directly creating phone alerts. During active cycles, it also
-runs an 8-second Wi-Fi scan/radio load pulse every 25 seconds. That leaves
-margin under the measured sub-40-second no-load cutoff on the HyperGear 15455
-power bank. When NTP is available, the next sample is aligned to the cadence
-boundary. It includes an NTP-backed
+2-minute samples while idle/done after that startup window, and 10-second
+samples again while motion or the done-confirmation quiet window is active. The
+ESP32 uses a cadence-only motion detector that is intentionally more sensitive
+than the relay notification classifier, so quiet washer movement keeps the
+board in fast sampling without directly creating phone alerts. During active
+cycles, it also runs an 8-second Wi-Fi scan/radio load pulse every 25 seconds.
+That leaves margin under the measured sub-40-second no-load cutoff on the
+HyperGear 15455 power bank. Post-finish idle/done naps intentionally avoid
+keep-alive pulses so the power bank can auto-off after the alert. When NTP is
+available, the next sample is aligned to the cadence boundary. It includes an NTP-backed
 `device_time_utc` field in telemetry payloads; the relay receive time remains
 as a fallback.
 
@@ -268,17 +269,16 @@ on the relay, not on the ESP32: the sensor sends signed readings, and the relay
 uses smoothed recent readings to decide phase labels and Gotify alerts.
 
 By default the production firmware uses ESP32 light sleep between samples, but
-long waits are split into shorter sleep slices so the USB battery bank does not
-auto-off. During a 30-second idle heartbeat, the ESP32 sleeps for 15 seconds,
-wakes for a 2.5-second Wi-Fi-radio keep-alive pulse, then finishes the remaining
-wait. The firmware turns Wi-Fi off between transmissions after the startup
-window and returns to 10-second sampling when it sees machine motion. Once a
-cycle is active or in the done-confirmation quiet window, it adds the heavier
-8-second Wi-Fi scan/radio pulse every 25 seconds so the power bank sees a
-substantial recurring load. The controllable onboard LED stays off except for
-transmit blinks and keep-alive pulses. Dashboard filters handling noise before
-applying the visible sample limit, so a few large bumps do not empty the live
-chart.
+only startup and active-cycle waits are split into keep-alive slices. After the
+startup window, idle/done states take a 2-minute nap with no keep-alive pulse so
+the USB battery bank can auto-off. The firmware turns Wi-Fi off between
+transmissions after the startup window and returns to 10-second sampling when it
+sees machine motion. Once a cycle is active or in the done-confirmation quiet
+window, it adds the heavier 8-second Wi-Fi scan/radio pulse every 25 seconds so
+the power bank sees a substantial recurring load. The controllable onboard LED
+stays off except for transmit blinks and keep-alive pulses. Dashboard filters
+handling noise before applying the visible sample limit, so a few large bumps do
+not empty the live chart.
 
 ## 8. Expected Alerts
 
