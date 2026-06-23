@@ -37,7 +37,10 @@ numbers:
 
 The ESP32 signs each event with an HMAC secret before sending it to the relay.
 The relay rejects unsigned traffic, stores calibration samples locally, and asks
-Gotify to notify your phone for finished-cycle events.
+Gotify to notify your phone for finished-cycle events. The relay can classify a
+finished cycle from quiet samples, and the production firmware also sends an
+explicit `done_sent` event when its own cadence detector reaches done so the
+notification does not depend on the sensor staying awake for extra quiet samples.
 
 The current production firmware uses a 10-second cadence for the first 10
 minutes after boot so a freshly woken USB power bank stays alive while you start

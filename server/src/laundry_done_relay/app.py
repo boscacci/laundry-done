@@ -85,8 +85,13 @@ def create_app(
             event = LaundryEvent.model_validate_json(body)
         except ValidationError as exc:
             raise HTTPException(status_code=422, detail="invalid event payload") from exc
+        already_notified = _done_sent_for_cycle_exists(db_path, event)
         duplicate = _store_event(db_path, event, body)
-        if not duplicate and event.state in {"done_sent", "button_pressed", "motion_started"}:
+        if (
+            not duplicate
+            and not already_notified
+            and event.state in {"done_sent", "button_pressed", "motion_started"}
+        ):
             sender(_message_for(event).model_dump())
         if not duplicate and event.state == "calibration_sample":
             _maybe_send_server_done(db_path, event, sender)
@@ -238,6 +243,24 @@ def _store_event(path: Path, event: LaundryEvent, raw_body: bytes) -> bool:
             return False
         except sqlite3.IntegrityError:
             return True
+
+
+def _done_sent_for_cycle_exists(path: Path, event: LaundryEvent) -> bool:
+    if event.state != "done_sent":
+        return False
+    with sqlite3.connect(path) as conn:
+        row = conn.execute(
+            """
+            SELECT 1
+            FROM events
+            WHERE state = 'done_sent'
+              AND device_id = ?
+              AND cycle_id = ?
+            LIMIT 1
+            """,
+            (event.device_id, event.cycle_id),
+        ).fetchone()
+    return row is not None
 
 
 def _list_calibration_events(

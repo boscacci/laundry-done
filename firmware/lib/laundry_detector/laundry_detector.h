@@ -153,6 +153,8 @@ BatteryKeepaliveNap next_battery_keepalive_nap(unsigned long remaining_nap_ms,
                                                DetectorState state,
                                                const TelemetryCadenceConfig &config);
 
+bool should_post_done_event(const Decision &decision);
+
 unsigned long active_cycle_load_pulse_ms(unsigned long now_ms,
                                          DetectorState state,
                                          unsigned long last_pulse_ms,

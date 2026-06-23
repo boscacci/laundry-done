@@ -55,8 +55,9 @@ sequenceDiagram
   Sensor->>Relay: Signed calibration_sample
   Relay->>Db: Store raw sample
   Relay->>Relay: Smooth and classify readings
-  Relay->>Db: Store server-generated done_sent marker
-  Relay->>Gotify: POST phone alert
+  Relay->>Db: Store server-generated done_sent marker when quiet confirms
+  Sensor->>Relay: Signed done_sent when firmware confirms done
+  Relay->>Gotify: POST phone alert for first done marker
   Browser->>Relay: GET /api/v1/calibration/events
   Relay->>Db: Read recent samples
   Relay-->>Browser: JSON samples, server phases, notification markers

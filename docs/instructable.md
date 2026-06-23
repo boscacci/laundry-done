@@ -296,11 +296,13 @@ For the current battery-bank-friendly setup:
 2. Start the washer or dryer.
 3. Let the ESP32 send samples and finished-cycle events. It checks in every 10
    seconds for the first 10 minutes so the USB battery bank stays awake while
-   the machine gets going. After that, idle/done states use a 2-minute light
-   sleep with no keep-alive pulse, so the HyperGear bank can auto-off after the
-   finished-cycle alert. It returns to 10-second samples when it sees motion,
-   and active cycles run an 8-second Wi-Fi scan/radio load pulse every 25
-   seconds to stay below the measured sub-40-second HyperGear no-load cutoff.
+   the machine gets going. During motion and quiet confirmation it keeps the
+   battery bank awake and sends an explicit finished-cycle event when its own
+   cadence detector reaches done. After that, idle/done states use a 2-minute
+   light sleep with no keep-alive pulse, so the HyperGear bank can auto-off
+   after the alert. Active cycles run an 8-second Wi-Fi scan/radio load pulse
+   every 25 seconds to stay below the measured sub-40-second HyperGear no-load
+   cutoff.
 4. Move laundry when Gotify notifies your phone.
 
 The firmware keeps the onboard LED off except for a very short transmit blink.

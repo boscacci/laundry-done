@@ -483,6 +483,29 @@ void test_cadence_detector_treats_quiet_washer_motion_as_active_for_sampling() {
   TEST_ASSERT_EQUAL(DetectorState::CycleRunning, confirmed.state);
 }
 
+void test_cadence_done_decision_requests_explicit_done_notification() {
+  LaundryDetector detector(telemetry_cadence_detector_config());
+
+  detector.observe(MotionWindow{0, 4, 20.0f, 104.0f});
+  Decision running =
+      detector.observe(MotionWindow{30UL * 1000UL + 1UL, 4, 20.0f, 104.0f});
+  TEST_ASSERT_EQUAL(DetectorState::CycleRunning, running.state);
+  TEST_ASSERT_FALSE(should_post_done_event(running));
+
+  Decision quieting = detector.observe(MotionWindow{20UL * 60UL * 1000UL, 4, 1.0f, 2.0f});
+  TEST_ASSERT_EQUAL(DetectorState::QuietCandidate, quieting.state);
+  TEST_ASSERT_FALSE(should_post_done_event(quieting));
+
+  Decision done = detector.observe(MotionWindow{30UL * 60UL * 1000UL + 1UL, 4, 1.0f, 2.0f});
+  TEST_ASSERT_EQUAL(DetectorState::DoneSent, done.state);
+  TEST_ASSERT_TRUE(done.should_post);
+  TEST_ASSERT_TRUE(should_post_done_event(done));
+
+  Decision duplicate = detector.observe(MotionWindow{32UL * 60UL * 1000UL, 4, 1.0f, 2.0f});
+  TEST_ASSERT_EQUAL(DetectorState::DoneSent, duplicate.state);
+  TEST_ASSERT_FALSE(should_post_done_event(duplicate));
+}
+
 void test_nap_duration_keeps_sample_start_cadence_near_target_interval() {
   TEST_ASSERT_EQUAL(9000UL, nap_duration_ms(1000UL, 2000UL, 10000UL));
   TEST_ASSERT_EQUAL(1UL, nap_duration_ms(1000UL, 12000UL, 10000UL));
@@ -520,6 +543,7 @@ int main(int argc, char **argv) {
   RUN_TEST(test_battery_keepalive_does_not_split_short_running_nap);
   RUN_TEST(test_cadence_detector_returns_to_idle_after_single_handling_jolt);
   RUN_TEST(test_cadence_detector_treats_quiet_washer_motion_as_active_for_sampling);
+  RUN_TEST(test_cadence_done_decision_requests_explicit_done_notification);
   RUN_TEST(test_nap_duration_keeps_sample_start_cadence_near_target_interval);
   RUN_TEST(test_aligned_wall_clock_nap_targets_next_interval_boundary);
   return UNITY_END();

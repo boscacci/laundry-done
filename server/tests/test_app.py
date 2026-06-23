@@ -159,6 +159,47 @@ def test_done_event_is_stored_and_pushed_once(tmp_path):
     ]
 
 
+def test_second_done_event_for_same_cycle_is_stored_without_second_push(tmp_path):
+    sent = []
+    database_path = tmp_path / "events.sqlite3"
+    app = create_app(
+        database_path=database_path,
+        device_secret="test-secret",
+        gotify_url="http://gotify.local",
+        gotify_app_token="token",
+        push_message=lambda message: sent.append(message),
+    )
+    client = TestClient(app)
+    payload = {
+        "device_id": "laundry-stack-1",
+        "event_id": "server-done-evt",
+        "cycle_id": "cycle-1",
+        "state": "done_sent",
+        "cycle_label": "washer",
+        "motion_rms_mg": 3.2,
+        "last_motion_ms": 600001,
+        "firmware_version": "server-classifier",
+    }
+
+    first = _post(client, "test-secret", payload)
+    second = _post(client, "test-secret", {**payload, "event_id": "firmware-done-evt"})
+
+    assert first.status_code == 202
+    assert second.status_code == 202
+    assert sent == [
+        {
+            "title": "Washer done",
+            "message": "No washer motion for 10 min.",
+            "priority": 5,
+        }
+    ]
+    with sqlite3.connect(database_path) as conn:
+        done_count = conn.execute(
+            "SELECT count(*) FROM events WHERE state = 'done_sent' AND cycle_id = 'cycle-1'"
+        ).fetchone()[0]
+    assert done_count == 2
+
+
 def test_rejects_bad_signature(tmp_path):
     app = create_app(
         database_path=tmp_path / "events.sqlite3",

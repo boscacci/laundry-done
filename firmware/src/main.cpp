@@ -54,6 +54,7 @@ constexpr uint8_t kSclPin = 22;
 constexpr unsigned long kSampleWindowMs = 4000;
 constexpr unsigned long kSampleIntervalMs = 40;
 constexpr TelemetryCadenceConfig kTelemetryCadence{};
+const DetectorConfig kTelemetryDetectorConfig = telemetry_cadence_detector_config();
 
 struct WifiTarget {
   bool seen = false;
@@ -72,7 +73,7 @@ String telemetry_run_id;
 bool clock_configured = false;
 bool clock_synced = false;
 unsigned long last_active_load_pulse_ms = 0;
-LaundryDetector telemetry_cadence_detector(telemetry_cadence_detector_config());
+LaundryDetector telemetry_cadence_detector(kTelemetryDetectorConfig);
 
 enum class MotionSensor {
   None,
@@ -611,6 +612,61 @@ bool post_calibration_sample_event(uint32_t event_counter,
   maybe_sleep_wifi();
   return status >= 200 && status < 300;
 }
+
+bool post_done_sent_event(uint32_t event_counter,
+                          const String &run_id,
+                          const MotionWindow &window,
+                          const Decision &decision,
+                          time_t sample_epoch_seconds) {
+  if (!connect_wifi()) {
+    Serial.println("done_post wifi_failed=true");
+    maybe_sleep_wifi();
+    return false;
+  }
+
+  JsonDocument doc;
+  const String event_id =
+      run_id + String("-done-") + String(event_counter) + "-" + String(window.at_ms);
+  const char *cycle_label = cycle_label_to_string(decision.label);
+  doc["device_id"] = DEVICE_ID;
+  doc["event_id"] = event_id;
+  doc["cycle_id"] = run_id;
+  doc["state"] = "done_sent";
+  doc["cycle_label"] = cycle_label;
+  doc["motion_rms_mg"] = window.rms_mg;
+  doc["last_motion_ms"] = kTelemetryDetectorConfig.done_quiet_ms;
+  doc["firmware_version"] = FIRMWARE_VERSION;
+  doc["peak_mg"] = window.peak_mg;
+  doc["sample_window_ms"] = kSampleWindowMs;
+  doc["sample_count"] = kSampleWindowMs / kSampleIntervalMs;
+  doc["sensor_type"] = motion_sensor_to_string(motion_sensor);
+  doc["uptime_ms"] = window.at_ms;
+  doc["wifi_rssi"] = WiFi.status() == WL_CONNECTED ? WiFi.RSSI() : -127;
+  const String device_time = format_utc(sample_epoch_seconds);
+  if (device_time.length() > 0) {
+    doc["device_time_utc"] = device_time;
+  }
+
+  String body;
+  serializeJson(doc, body);
+
+  HTTPClient http;
+  http.begin(RELAY_URL);
+  http.addHeader("content-type", "application/json");
+  http.addHeader("x-laundry-signature", hmac_sha256(body));
+  blink_transmit_led();
+  const int status = http.POST(body);
+  Serial.printf("done_post status=%d event_id=%s cycle_label=%s rms_mg=%.1f peak_mg=%.1f rssi=%d\n",
+                status,
+                event_id.c_str(),
+                cycle_label,
+                window.rms_mg,
+                window.peak_mg,
+                WiFi.status() == WL_CONNECTED ? WiFi.RSSI() : -127);
+  http.end();
+  maybe_sleep_wifi();
+  return status >= 200 && status < 300;
+}
 } // namespace
 
 #if LAUNDRY_I2C_SCAN
@@ -1016,6 +1072,15 @@ void loop() {
                 cycle_label_to_string(cadence_decision.label));
 
   telemetry_counter++;
+  if (should_post_done_event(cadence_decision)) {
+    const bool done_ok = post_done_sent_event(
+        telemetry_counter,
+        telemetry_run_id,
+        window,
+        cadence_decision,
+        sample_epoch_seconds);
+    Serial.printf("done_result ok=%s\n", done_ok ? "true" : "false");
+  }
   const bool telemetry_ok = post_calibration_sample_event(
       telemetry_counter,
       telemetry_run_id,
