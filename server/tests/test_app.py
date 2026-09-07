@@ -461,7 +461,7 @@ def test_server_classifies_readings_and_sends_done_notification(tmp_path):
     client = TestClient(app)
     start = datetime(2026, 5, 24, 20, 0, tzinfo=timezone.utc)
 
-    for index in range(8):
+    for index in range(61):
         response = _post(
             client,
             "test-secret",
@@ -475,13 +475,13 @@ def test_server_classifies_readings_and_sends_done_notification(tmp_path):
         assert response.status_code == 202
     assert sent == []
 
-    for index in range(66):
+    for index in range(67):
         response = _post(
             client,
             "test-secret",
             _calibration_payload(
                 event_id=f"quiet-{index}",
-                at=start + timedelta(seconds=80 + index * 10),
+                at=start + timedelta(seconds=610 + index * 10),
                 rms=0.8,
                 peak=2.0,
             ),
@@ -494,7 +494,7 @@ def test_server_classifies_readings_and_sends_done_notification(tmp_path):
             "test-secret",
             _calibration_payload(
                 event_id="quiet-final",
-                at=start + timedelta(seconds=80 + 66 * 10),
+                at=start + timedelta(seconds=610 + 67 * 10),
                 rms=0.8,
                 peak=2.0,
             ),
@@ -514,7 +514,7 @@ def test_server_classifies_readings_and_sends_done_notification(tmp_path):
             "test-secret",
             _calibration_payload(
                 event_id="quiet-duplicate",
-                at=start + timedelta(seconds=80 + 67 * 10),
+                at=start + timedelta(seconds=610 + 68 * 10),
                 rms=0.8,
                 peak=2.0,
             ),
@@ -545,7 +545,7 @@ def test_server_done_label_uses_current_cycle_after_previous_notification(tmp_pa
     client = TestClient(app)
     washer_start = datetime.now(timezone.utc).replace(microsecond=0) - timedelta(hours=4)
 
-    for index in range(8):
+    for index in range(61):
         response = _post(
             client,
             "test-secret",
@@ -558,13 +558,13 @@ def test_server_done_label_uses_current_cycle_after_previous_notification(tmp_pa
         )
         assert response.status_code == 202
 
-    for index in range(67):
+    for index in range(68):
         response = _post(
             client,
             "test-secret",
             _calibration_payload(
                 event_id=f"washer-quiet-{index}",
-                at=washer_start + timedelta(seconds=80 + index * 10),
+                at=washer_start + timedelta(seconds=610 + index * 10),
                 rms=0.8,
                 peak=2.0,
             ),
@@ -590,12 +590,12 @@ def test_server_done_label_uses_current_cycle_after_previous_notification(tmp_pa
         )
         conn.execute(
             "UPDATE events SET received_at = ? WHERE state = 'done_sent'",
-            (_utc_text(washer_start + timedelta(minutes=13)),),
+            (_utc_text(washer_start + timedelta(minutes=22)),),
         )
     sent.clear()
 
     dryer_start = washer_start + timedelta(hours=2)
-    dryer_readings = [(27.9, 69.6)] + [(24.0, 50.0)] * 15
+    dryer_readings = [(27.9, 69.6)] + [(24.0, 50.0)] * 60
     for index, (rms, peak) in enumerate(dryer_readings):
         response = _post(
             client,
@@ -609,7 +609,7 @@ def test_server_done_label_uses_current_cycle_after_previous_notification(tmp_pa
         )
         assert response.status_code == 202
 
-    for index in range(67):
+    for index in range(68):
         response = _post(
             client,
             "test-secret",

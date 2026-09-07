@@ -42,6 +42,18 @@ finished cycle from quiet samples, and the production firmware also sends an
 explicit `done_sent` event when its own cadence detector reaches done so the
 notification does not depend on the sensor staying awake for extra quiet samples.
 
+The server's fallback completion detector only uses the current connected device
+session. A reboot, uptime reset, or reporting gap longer than three minutes
+discards earlier motion evidence and resets its smoothing window. Missing packets
+are **not** quiet readings. Before sending an inferred completion alert, it needs
+at least eight minutes of adjacent observed activity, followed by ten minutes of
+observed quiet (plus classifier smoothing). Brief setup movement cannot satisfy
+the runtime requirement merely by sitting still afterward. The existing explicit
+firmware `done_sent` notification path is unchanged by these server safeguards.
+
+If the dashboard says there are no recent packets, check the device's power bank
+and Wi-Fi; a reachable dashboard alone does not mean a load is being monitored.
+
 The current production firmware uses a 10-second cadence for the first 10
 minutes after boot so a freshly woken USB power bank stays alive while you start
 the washer or dryer. After that, idle/done states use a 2-minute light-sleep nap

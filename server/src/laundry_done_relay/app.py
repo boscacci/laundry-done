@@ -40,6 +40,9 @@ NOTIFICATION_STATES = ("done_sent", "button_pressed", "motion_started")
 SERVER_CLASSIFIER_SMOOTHING_SAMPLES = 8
 SERVER_DONE_QUIET_SECONDS = 10 * 60
 SERVER_MINIMUM_RUNTIME_SECONDS = 8 * 60
+# Allow the firmware's two-minute idle cadence plus network jitter. A longer
+# gap is missing evidence, never evidence that the appliance stayed quiet.
+SERVER_MAX_SAMPLE_GAP_SECONDS = 3 * 60
 
 
 def create_app(
@@ -306,8 +309,13 @@ def _list_calibration_events(
 
 
 def _maybe_send_server_done(path: Path, event: LaundryEvent, sender: PushMessage) -> None:
-    samples = _calibration_events_for_device(path, event.device_id)
+    samples = _current_observation_segment(
+        _calibration_events_for_device(path, event.device_id)
+    )
     if len(samples) < SERVER_CLASSIFIER_SMOOTHING_SAMPLES:
+        return
+    # Delayed/backfilled readings must not trigger a notification about newer data.
+    if samples[-1]["event_id"] != event.event_id:
         return
     phases = _server_base_phases(samples)
     latest_sample = samples[-1]
@@ -330,13 +338,28 @@ def _maybe_send_server_done(path: Path, event: LaundryEvent, sender: PushMessage
         active_indexes.append(index)
     if not active_indexes:
         return
-    first_active_at = _event_timestamp(samples[active_indexes[0]])
     last_active_at = _event_timestamp(samples[active_indexes[-1]])
-    if first_active_at is None or last_active_at is None:
+    if last_active_at is None:
         return
-    if (latest_quiet_at - last_active_at).total_seconds() < SERVER_DONE_QUIET_SECONDS:
+    quiet_start = len(phases) - 1
+    while quiet_start > 0 and phases[quiet_start - 1]["short"] == "quiet":
+        quiet_start -= 1
+    quiet_started_at = _event_timestamp(samples[quiet_start])
+    if quiet_started_at is None:
         return
-    if (latest_quiet_at - first_active_at).total_seconds() < SERVER_MINIMUM_RUNTIME_SECONDS:
+    if (latest_quiet_at - quiet_started_at).total_seconds() < SERVER_DONE_QUIET_SECONDS:
+        return
+    # Count adjacent observed active intervals, not wall time since the first
+    # bump. Otherwise the ten-minute quiet wait itself satisfies "8 min running".
+    active_seconds = 0.0
+    for previous, current in zip(active_indexes, active_indexes[1:]):
+        if current != previous + 1:
+            continue
+        previous_at = _event_timestamp(samples[previous])
+        current_at = _event_timestamp(samples[current])
+        if previous_at is not None and current_at is not None:
+            active_seconds += (current_at - previous_at).total_seconds()
+    if active_seconds < SERVER_MINIMUM_RUNTIME_SECONDS:
         return
     if _has_notification_after(path, event.device_id, last_active_at):
         return
@@ -355,6 +378,35 @@ def _maybe_send_server_done(path: Path, event: LaundryEvent, sender: PushMessage
     raw_body = notification.model_dump_json().encode("utf-8")
     if not _store_event(path, notification, raw_body):
         sender(_message_for(notification).model_dump())
+
+
+def _current_observation_segment(samples: list[dict]) -> list[dict]:
+    """Keep smoothing and completion evidence within one connected boot session."""
+    start = 0
+    for index in range(1, len(samples)):
+        previous, current = samples[index - 1], samples[index]
+        previous_at, current_at = _event_timestamp(previous), _event_timestamp(current)
+        previous_received = _received_timestamp(previous)
+        current_received = _received_timestamp(current)
+        changed_session = current.get("cycle_id") != previous.get("cycle_id")
+        uptime_reset = (
+            isinstance(previous.get("uptime_ms"), (int, float))
+            and isinstance(current.get("uptime_ms"), (int, float))
+            and current["uptime_ms"] < previous["uptime_ms"]
+        )
+        sample_gap = (
+            previous_at is None
+            or current_at is None
+            or not 0 < (current_at - previous_at).total_seconds() <= SERVER_MAX_SAMPLE_GAP_SECONDS
+        )
+        receipt_gap = (
+            previous_received is not None
+            and current_received is not None
+            and (current_received - previous_received).total_seconds() > SERVER_MAX_SAMPLE_GAP_SECONDS
+        )
+        if changed_session or uptime_reset or sample_gap or receipt_gap:
+            start = index
+    return samples[start:]
 
 
 def _calibration_events_for_device(path: Path, device_id: str) -> list[dict]:
