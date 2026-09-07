@@ -62,7 +62,8 @@ It routes by SNI:
 ```text
 laundry.robertboscacci.com  -> 127.0.0.1:8444  # Caddy TLS passthrough
 photos.robertboscacci.com   -> 127.0.0.1:9445  # PhotoPrism Caddy
-vhf-dev.robertboscacci.com  -> 127.0.0.1:9443  # nginx TLS termination
+vhf-dev.robertboscacci.com  -> 127.0.0.1:8444  # legacy VHF Caddy hostname
+dev.seattleboatradio.com   -> 127.0.0.1:9443  # VHF nginx TLS backend
 ```
 
 The same nginx container owns LAN port `443`. Its port `80` listener catches
@@ -97,7 +98,14 @@ https://laundry.robertboscacci.com/healthz
 https://gotify.robertboscacci.com/health
 ```
 
-By default it runs every 5 minutes with a 10-second timeout. It does not send
+These probes resolve through Docker aliases directly to Caddy. They check
+internal connectivity, not the Tailscale/SNI entrance. The host's
+`front-door-watch.timer` now verifies the real tailnet TLS route and public
+Gotify with certificate validation, after boot and about every two minutes.
+It also restores a changed TCP 443 mapping. See `rc/optiplex/front-door/README.md`
+for recovery limits and `~/.local/state/front-door/status.json` for its latest result.
+
+By default the internal worker runs every 5 minutes with a 10-second timeout. It does not send
 Gotify messages and does not need app tokens. The worker logs structured JSON
 records with query strings stripped from URLs.
 
@@ -136,12 +144,11 @@ gotify.robertboscacci.com.   A/AAAA  CloudFront alias
   `DEVICE_SECRET`.
 - Keep `GOTIFY_URL` in `.env` as `http://gotify:80`; that is the relay's
   internal Docker-to-Docker URL.
-- If Firefox cannot load `laundry.robertboscacci.com`, first confirm Tailscale
-  is connected, then confirm `tailscale funnel status` shows nothing on HTTPS
-  `443`.
+- If Firefox cannot load `laundry.robertboscacci.com`, confirm Tailscale is connected,
+  then check `front-door-watch.service` and require TCP 443 to forward to 9444.
 
-## Disable Conflicting Funnel
+## Reconcile the shared TLS entrance
 
 ```bash
-tailscale funnel --https=443 off
+bash ~/repos/rc/optiplex/front-door/configure-tailnet-tls-front-door.sh
 ```

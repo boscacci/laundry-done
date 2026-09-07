@@ -62,10 +62,9 @@ tailscale funnel --bg --https=10000 --set-path=/gotify --yes 127.0.0.1:8089
 tailscale funnel status
 ```
 
-Do not use Funnel or Serve on HTTPS `443` for Gotify. That port is reserved for
-the Optiplex front-door nginx listener that serves tailnet custom domains such
-as `laundry.robertboscacci.com`. If Tailscale owns `443`, Firefox and other
-tailnet clients can hit a TLS alert before the request reaches nginx/Caddy.
+Tailnet TCP `443` must forward to the shared nginx SNI listener on loopback
+`9444`. Do not replace it with Gotify HTTPS termination or a direct forward
+to PhotoPrism. The source and recovery timer live in `rc/optiplex/front-door`.
 
 The `10000/gotify` Funnel origin is public by design for this service. Gotify
 authentication and app tokens remain the application-level access control.
