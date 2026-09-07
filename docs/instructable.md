@@ -217,13 +217,14 @@ https://laundry.robertboscacci.com/monitor
 
 This URL is still private: the DNS record points at the home server's Tailscale
 address, so your phone/laptop must be connected to the tailnet. The ESP32 can
-keep posting to the local LAN URL; browsers get HTTPS through Caddy and
-Tailscale:
+keep posting to the local LAN URL; browsers get HTTPS through the Optiplex
+front-door nginx container and Caddy. Keep Tailscale Funnel off HTTPS `443` so
+the custom dashboard hostname reaches nginx/Caddy instead of Tailscale's Funnel
+listener:
 
 ```bash
 docker compose up -d --build caddy
 tailscale funnel --https=443 off
-tailscale serve --bg --yes --tcp=443 tcp://127.0.0.1:8444
 ```
 
 The chart shows:

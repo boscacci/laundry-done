@@ -22,6 +22,24 @@ variable "gotify_record_name" {
   default     = "gotify"
 }
 
+variable "gotify_public_origin_domain" {
+  description = "Public Tailscale Funnel DNS name that CloudFront uses as the Gotify origin."
+  type        = string
+  default     = "optiplex.tailbea63b.ts.net"
+}
+
+variable "gotify_public_origin_port" {
+  description = "Public Tailscale Funnel HTTPS port that CloudFront uses as the Gotify origin."
+  type        = number
+  default     = 10000
+}
+
+variable "gotify_public_origin_path" {
+  description = "Public Tailscale Funnel path that CloudFront prepends for the Gotify origin."
+  type        = string
+  default     = "/gotify"
+}
+
 variable "tailnet_ipv4" {
   description = "Tailscale IPv4 address for the host serving the private apps."
   type        = string
