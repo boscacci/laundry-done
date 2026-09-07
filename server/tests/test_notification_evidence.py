@@ -77,14 +77,14 @@ def test_quiet_startup_never_sends_done(monitor):
 def test_current_observed_cycle_notifies_once_after_four_minutes_quiet(monitor):
     for seconds in range(0, 610, 10):
         reading(monitor, seconds, active=True)
-    for seconds in range(610, 920, 10):
+    for seconds in range(610, 850, 10):
         reading(monitor, seconds)
     assert monitor[1] == []
-    reading(monitor, 920)
+    reading(monitor, 850)
     assert len(monitor[1]) == 1
     assert monitor[1][0]["title"] == "Washer done"
     assert monitor[1][0]["message"] == "No washer motion for 4 min."
-    reading(monitor, 930)
+    reading(monitor, 860)
     assert len(monitor[1]) == 1
 
 
@@ -94,7 +94,7 @@ def test_current_cycle_can_arm_after_an_overnight_gap(monitor):
     morning = 12 * 3600
     for seconds in range(morning, morning + 610, 10):
         reading(monitor, seconds, active=True, session="boot-2")
-    for seconds in range(morning + 610, morning + 940, 10):
+    for seconds in range(morning + 610, morning + 870, 10):
         reading(monitor, seconds, session="boot-2")
     assert len(monitor[1]) == 1
 

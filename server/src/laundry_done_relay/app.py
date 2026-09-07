@@ -318,9 +318,10 @@ def _maybe_send_server_done(path: Path, event: LaundryEvent, sender: PushMessage
     if samples[-1]["event_id"] != event.event_id:
         return
     phases = _server_base_phases(samples)
+    raw_phases = [_classify_server_event(sample) for sample in samples]
     latest_sample = samples[-1]
     latest_phase = phases[-1]
-    if latest_phase["short"] != "quiet":
+    if latest_phase["short"] != "quiet" or raw_phases[-1]["short"] != "quiet":
         return
 
     latest_quiet_at = _event_timestamp(latest_sample)
@@ -341,8 +342,10 @@ def _maybe_send_server_done(path: Path, event: LaundryEvent, sender: PushMessage
     last_active_at = _event_timestamp(samples[active_indexes[-1]])
     if last_active_at is None:
         return
-    quiet_start = len(phases) - 1
-    while quiet_start > 0 and phases[quiet_start - 1]["short"] == "quiet":
+    # Start the clock at the first raw quiet reading so classifier smoothing
+    # confirms the signal without delaying the requested completion window.
+    quiet_start = len(raw_phases) - 1
+    while quiet_start > 0 and raw_phases[quiet_start - 1]["short"] == "quiet":
         quiet_start -= 1
     quiet_started_at = _event_timestamp(samples[quiet_start])
     if quiet_started_at is None:

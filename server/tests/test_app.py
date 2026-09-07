@@ -475,7 +475,7 @@ def test_server_classifies_readings_and_sends_done_notification(tmp_path):
         assert response.status_code == 202
     assert sent == []
 
-    for index in range(31):
+    for index in range(24):
         response = _post(
             client,
             "test-secret",
@@ -494,7 +494,7 @@ def test_server_classifies_readings_and_sends_done_notification(tmp_path):
             "test-secret",
             _calibration_payload(
                 event_id="quiet-final",
-                at=start + timedelta(seconds=920),
+                at=start + timedelta(seconds=850),
                 rms=0.8,
                 peak=2.0,
             ),
@@ -514,7 +514,7 @@ def test_server_classifies_readings_and_sends_done_notification(tmp_path):
             "test-secret",
             _calibration_payload(
                 event_id="quiet-duplicate",
-                at=start + timedelta(seconds=930),
+                at=start + timedelta(seconds=860),
                 rms=0.8,
                 peak=2.0,
             ),
