@@ -921,8 +921,17 @@ def test_monitor_page_serves_realtime_dashboard(tmp_path):
     assert "wake-node" in response.text
     assert "wake-state" in response.text
     assert 'max="12" value="4"' in response.text
-    assert "about 2 min" in response.text
+    assert "about 2 min" not in response.text
+    assert "10-second cadence" not in response.text
+    assert "Cadence learned from recent packet arrivals" in response.text
+    assert "Typical packet gap" in response.text
+    assert "Stale after" in response.text
+    assert 'id="cadence"' in response.text
+    assert 'id="sync-detail"' in response.text
     assert "sampleTime" in response.text
+    assert "packetTime" in response.text
+    assert "packetTimestamp" in response.text
+    assert "freshnessLimitMs" in response.text
     assert "sampleTimestamp" in response.text
     assert 'value="900000">Live 15 min' in response.text
     assert 'value="1920000" selected>Last 32 min' in response.text

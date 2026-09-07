@@ -1048,7 +1048,7 @@ def _monitor_html() -> str:
 <body>
   <header>
     <h1>Laundry Activity Monitor</h1>
-    <div class="small" id="clock">Waiting for samples</div>
+    <div class="small" id="clock">Waiting for packets</div>
   </header>
   <main>
     <section class="panel">
@@ -1085,7 +1085,7 @@ def _monitor_html() -> str:
             <input id="smooth" type="range" min="1" max="12" value="4" step="1">
             <span class="range-value" id="smooth-value">4 samples</span>
           </div>
-          <div class="small">Up to about 2 min on a 10-second cadence.</div>
+          <div class="small">Averaging spans recent packets; live cadence is learned from relay arrivals.</div>
         </div>
       </div>
       <div class="explainer">
@@ -1164,12 +1164,14 @@ def _monitor_html() -> str:
           <div class="label">Last check-in</div>
           <div class="value" id="last-age">--</div>
           <div class="small" id="last">No latest sample</div>
+          <div class="small" id="cadence">Cadence learned from recent packet arrivals</div>
+          <div class="small" id="sync-detail">Stale after missed packets</div>
           <div class="small" id="rssi">Radio detail hidden</div>
         </div>
       </section>
       <section class="panel">
         <table>
-          <thead><tr><th>Time</th><th>Shake</th><th>Jolt</th><th>Guess</th></tr></thead>
+          <thead><tr><th>Sample time</th><th>Shake</th><th>Jolt</th><th>Guess</th></tr></thead>
           <tbody id="rows"></tbody>
         </table>
       </section>
@@ -1178,6 +1180,8 @@ def _monitor_html() -> str:
   <script>
     const chart = document.getElementById('chart');
     const ctx = chart.getContext('2d');
+    const DEFAULT_PACKET_CADENCE_MS = 15000;
+    const MIN_PACKET_STALE_MS = 75000;
     const state = { samples: [], notifications: [], timer: null, paused: false, hover: null };
     const els = {
       pause: document.getElementById('pause'),
@@ -1199,6 +1203,8 @@ def _monitor_html() -> str:
       count: document.getElementById('count'),
       run: document.getElementById('run'),
       lastAge: document.getElementById('last-age'),
+      cadence: document.getElementById('cadence'),
+      syncDetail: document.getElementById('sync-detail'),
       rssi: document.getElementById('rssi'),
       last: document.getElementById('last'),
       rows: document.getElementById('rows'),
@@ -1239,22 +1245,28 @@ def _monitor_html() -> str:
       return sample?.device_time_utc || sample?.received_at || null;
     }
 
-    function sampleTimestamp(sample) {
-      const time = sampleTime(sample);
-      if (!time) return null;
-      const text = String(time);
+    function packetTime(sample) {
+      return sample?.received_at || sample?.device_time_utc || null;
+    }
+
+    function parseTimestamp(value) {
+      if (!value) return null;
+      const text = String(value);
       const date = text.includes('T') ? new Date(text) : new Date(text.replace(' ', 'T') + 'Z');
       const timestamp = date.getTime();
       return Number.isFinite(timestamp) ? timestamp : null;
     }
 
+    function sampleTimestamp(sample) {
+      return parseTimestamp(sampleTime(sample));
+    }
+
+    function packetTimestamp(sample) {
+      return parseTimestamp(packetTime(sample));
+    }
+
     function notificationTimestamp(notification) {
-      const time = notification?.received_at || null;
-      if (!time) return null;
-      const text = String(time);
-      const date = text.includes('T') ? new Date(text) : new Date(text.replace(' ', 'T') + 'Z');
-      const timestamp = date.getTime();
-      return Number.isFinite(timestamp) ? timestamp : null;
+      return parseTimestamp(notification?.received_at || null);
     }
 
     function latestActivityTimestamp() {
@@ -1267,46 +1279,45 @@ def _monitor_html() -> str:
 
     function sampleAgeSeconds(sample) {
       if (!sample) return Infinity;
-      const time = sampleTime(sample);
-      if (!time) return Infinity;
-      const sampleDate = time.includes('T')
-        ? new Date(time)
-        : new Date(time.replace(' ', 'T') + 'Z');
-      if (Number.isNaN(sampleDate.getTime())) return Infinity;
-      return Math.max(0, Math.round((Date.now() - sampleDate.getTime()) / 1000));
+      const timestamp = packetTimestamp(sample);
+      if (!Number.isFinite(timestamp)) return Infinity;
+      return Math.max(0, Math.round((Date.now() - timestamp) / 1000));
     }
 
     function estimateSampleCadenceMs(samples) {
       const timestamps = samples
-        .map(sampleTimestamp)
+        .map(packetTimestamp)
         .filter(timestamp => Number.isFinite(timestamp));
-      if (timestamps.length < 2) return 12000;
+      if (timestamps.length < 2) return DEFAULT_PACKET_CADENCE_MS;
       const recent = timestamps.slice(-10);
       const deltas = [];
       for (let index = 1; index < recent.length; index++) {
         const delta = recent[index] - recent[index - 1];
-        if (delta >= 5000 && delta <= 90000) deltas.push(delta);
+        if (delta >= 5000 && delta <= 120000) deltas.push(delta);
       }
-      if (deltas.length === 0) return 12000;
+      if (deltas.length === 0) return DEFAULT_PACKET_CADENCE_MS;
       deltas.sort((a, b) => a - b);
       return deltas[Math.floor(deltas.length / 2)];
     }
 
     function updatePingCountdown() {
       const latest = state.samples[state.samples.length - 1];
-      const latestTimestamp = sampleTimestamp(latest);
       const cadenceMs = estimateSampleCadenceMs(state.samples);
+      const latestTimestamp = packetTimestamp(latest);
       const ageMs = Number.isFinite(latestTimestamp) ? Math.max(0, Date.now() - latestTimestamp) : Infinity;
-      const synced = Boolean(latest) && Number.isFinite(ageMs) && ageMs <= Math.max(75000, cadenceMs * 3);
+      const staleAfterMs = freshnessLimitMs(cadenceMs);
+      const synced = Boolean(latest) && Number.isFinite(ageMs) && ageMs <= staleAfterMs;
       if (!synced) {
         els.pingCountdown.style.setProperty('--ping-sweep', '0%');
-        els.pingEta.textContent = 'No sync';
+        els.pingEta.textContent = latest ? 'No recent packets' : 'No packets';
         return;
       }
       const remainingMs = Math.max(0, cadenceMs - ageMs);
       const sweep = Math.max(0, Math.min(100, (remainingMs / cadenceMs) * 100));
       els.pingCountdown.style.setProperty('--ping-sweep', `${sweep}%`);
-      els.pingEta.textContent = remainingMs > 0 ? `Next ~${Math.ceil(remainingMs / 1000)}s` : 'Ping due';
+      els.pingEta.textContent = remainingMs > 0
+        ? `Next expected ~${formatDurationMs(remainingMs)}`
+        : `Due now, stale after ${formatDurationMs(staleAfterMs - ageMs)}`;
     }
 
     function numeric(value, fallback = 0) {
@@ -1351,6 +1362,18 @@ def _monitor_html() -> str:
       return remainingHours > 0 ? `${dayText} ${remainingHours} hr` : dayText;
     }
 
+    function formatDurationMs(ms) {
+      if (!Number.isFinite(ms)) return '--';
+      const seconds = Math.max(0, Math.round(ms / 1000));
+      if (seconds < 90) return `${seconds}s`;
+      const minutes = Math.round(seconds / 60);
+      return `${minutes} min`;
+    }
+
+    function freshnessLimitMs(cadenceMs) {
+      return Math.max(MIN_PACKET_STALE_MS, cadenceMs * 4);
+    }
+
     function setConnectionNode(node, stateEl, online, onlineText) {
       node.classList.toggle('connection-online', online);
       node.classList.toggle('connection-offline', !online);
@@ -1359,21 +1382,34 @@ def _monitor_html() -> str:
 
     function updateConnectionIndicators(latest) {
       const ageSeconds = sampleAgeSeconds(latest);
-      const linkOnline = Boolean(latest) && ageSeconds <= 75 && Number.isFinite(Number(latest.wifi_rssi));
+      const cadenceMs = estimateSampleCadenceMs(state.samples);
+      const staleAfterMs = freshnessLimitMs(cadenceMs);
+      const ageMs = Number.isFinite(ageSeconds) ? ageSeconds * 1000 : Infinity;
+      const linkOnline = Boolean(latest)
+        && ageMs <= staleAfterMs
+        && Number.isFinite(Number(latest.wifi_rssi));
       setConnectionNode(els.linkNode, els.linkState, linkOnline, 'Connected');
       els.wakeNode.classList.remove('connection-online', 'connection-offline', 'connection-napping');
-      if (!latest || ageSeconds > 75) {
+      if (!latest || ageMs > staleAfterMs) {
         els.wakeNode.classList.add('connection-offline');
-        els.wakeState.textContent = 'Asleep / off';
-      } else if (ageSeconds <= 15) {
+        els.wakeState.textContent = 'No recent packets';
+      } else if (ageMs <= Math.max(18000, cadenceMs * 1.5)) {
         els.wakeNode.classList.add('connection-online');
-        els.wakeState.textContent = 'Awake now';
+        els.wakeState.textContent = 'Packet fresh';
       } else {
         els.wakeNode.classList.add('connection-napping');
-        els.wakeState.textContent = 'Between samples';
+        els.wakeState.textContent = 'Waiting for next packet';
       }
       els.lastAge.textContent = latest ? formatAge(ageSeconds) : '--';
-      els.rssi.textContent = linkOnline ? 'Recent radio check-in' : 'No recent radio check-in';
+      els.cadence.textContent = latest
+        ? `Typical packet gap ${formatDurationMs(cadenceMs)}`
+        : 'Cadence learned from recent packet arrivals';
+      els.syncDetail.textContent = latest
+        ? `Stale after ${formatDurationMs(staleAfterMs)} without packets`
+        : 'Stale after missed packets';
+      els.rssi.textContent = linkOnline
+        ? `Radio check-in ${formatWifiSignal(latest.wifi_rssi)}`
+        : 'No recent radio check-in';
       updatePingCountdown();
     }
 
@@ -1511,14 +1547,14 @@ def _monitor_html() -> str:
       const phases = classifySamples(state.samples);
       const latestGuess = phases[phases.length - 1] || null;
       els.count.textContent = state.samples.length.toString();
-      els.clock.textContent = latest ? `Latest sample ${formatTime(sampleTime(latest))}` : 'Waiting for samples';
+      els.clock.textContent = latest ? `Latest packet ${formatTime(packetTime(latest))}` : 'Waiting for packets';
       els.rms.textContent = latest ? formatNumber(latest.motion_rms_mg) : '--';
       els.peak.textContent = latest ? formatNumber(latest.peak_mg) : '--';
       els.guess.textContent = latestGuess ? latestGuess.label : 'Waiting';
       els.guess.style.background = latestGuess ? latestGuess.color : 'var(--gentle)';
       els.guessDetail.textContent = latestGuess ? latestGuess.detail : 'Needs samples';
       updateConnectionIndicators(latest);
-      els.last.textContent = latest ? `Checked in at ${formatTime(sampleTime(latest))}` : 'No latest sample';
+      els.last.textContent = latest ? `Relay received at ${formatTime(packetTime(latest))}` : 'No latest packet';
       els.run.textContent = latest ? 'Live samples loaded' : 'No run yet';
       const rowStart = Math.max(0, state.samples.length - 8);
       els.rows.innerHTML = state.samples.slice(rowStart).reverse().map((sample, reverseIndex) => {
