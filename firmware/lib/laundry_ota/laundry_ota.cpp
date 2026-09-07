@@ -128,11 +128,28 @@ bool download(const JsonDocument &manifest, const String &relay_url,
   unsigned next_progress = 25;
   const unsigned long started = millis();
   WiFiClient *stream = http.getStreamPtr();
-  stream->setTimeout(5000);
+  // WiFiClient in Arduino 2.x takes seconds, unlike HTTPClient's milliseconds.
+  stream->setTimeout(5);
   while (ok && received < size) {
     const size_t count = min(sizeof(encrypted), size - received);
     // Full blocks except the final one, as required by this core's GCM API.
-    const size_t got = stream->readBytes(encrypted, count);
+    size_t got = 0;
+    unsigned long last_byte_at = millis();
+    while (got < count && millis() - started < kUpdateTimeoutMs &&
+           millis() - last_byte_at < 5000UL) {
+      const int available = stream->available();
+      if (available > 0) {
+        const int read = stream->read(encrypted + got,
+            min(count - got, static_cast<size_t>(available)));
+        if (read <= 0) break;
+        got += read;
+        last_byte_at = millis();
+      } else if (!stream->connected()) {
+        break;
+      } else {
+        delay(1);
+      }
+    }
     ok = got == count && millis() - started < kUpdateTimeoutMs &&
          mbedtls_gcm_update(&cipher, count, encrypted, plaintext) == 0 &&
          mbedtls_sha256_update_ret(&hash, plaintext, count) == 0 &&
