@@ -38,7 +38,7 @@ EVENT_RETENTION_DAYS = 14
 MAX_CALIBRATION_EVENTS = 200_000
 NOTIFICATION_STATES = ("done_sent", "button_pressed", "motion_started")
 SERVER_CLASSIFIER_SMOOTHING_SAMPLES = 8
-SERVER_DONE_QUIET_SECONDS = 10 * 60
+SERVER_DONE_QUIET_SECONDS = 4 * 60
 SERVER_MINIMUM_RUNTIME_SECONDS = 8 * 60
 # Allow the firmware's two-minute idle cadence plus network jitter. A longer
 # gap is missing evidence, never evidence that the appliance stayed quiet.
@@ -350,7 +350,7 @@ def _maybe_send_server_done(path: Path, event: LaundryEvent, sender: PushMessage
     if (latest_quiet_at - quiet_started_at).total_seconds() < SERVER_DONE_QUIET_SECONDS:
         return
     # Count adjacent observed active intervals, not wall time since the first
-    # bump. Otherwise the ten-minute quiet wait itself satisfies "8 min running".
+    # bump. Otherwise the quiet wait itself satisfies "8 min running".
     active_seconds = 0.0
     for previous, current in zip(active_indexes, active_indexes[1:]):
         if current != previous + 1:
@@ -372,7 +372,7 @@ def _maybe_send_server_done(path: Path, event: LaundryEvent, sender: PushMessage
         state="done_sent",
         cycle_label=label,
         motion_rms_mg=float(latest_sample.get("motion_rms_mg", 0)),
-        last_motion_ms=int((latest_quiet_at - last_active_at).total_seconds() * 1000),
+        last_motion_ms=SERVER_DONE_QUIET_SECONDS * 1000,
         firmware_version="server-classifier",
     )
     raw_body = notification.model_dump_json().encode("utf-8")
@@ -2005,13 +2005,18 @@ def _message_for(event: LaundryEvent) -> GotifyMessage:
                 f"{event.motion_rms_mg:.1f} mg ({event.event_id})."
             ),
         )
+    quiet_minutes = max(1, event.last_motion_ms // (60 * 1000))
     if event.cycle_label == "washer":
-        return GotifyMessage(title="Washer done", message="No washer motion for 10 min.")
+        return GotifyMessage(
+            title="Washer done", message=f"No washer motion for {quiet_minutes} min."
+        )
     if event.cycle_label == "dryer":
-        return GotifyMessage(title="Dryer done", message="No dryer motion for 10 min.")
+        return GotifyMessage(
+            title="Dryer done", message=f"No dryer motion for {quiet_minutes} min."
+        )
     return GotifyMessage(
         title="Laundry stack stopped",
-        message="No washer/dryer stack motion for 10 min.",
+        message=f"No washer/dryer stack motion for {quiet_minutes} min.",
     )
 
 

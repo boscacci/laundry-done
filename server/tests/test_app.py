@@ -475,7 +475,7 @@ def test_server_classifies_readings_and_sends_done_notification(tmp_path):
         assert response.status_code == 202
     assert sent == []
 
-    for index in range(67):
+    for index in range(31):
         response = _post(
             client,
             "test-secret",
@@ -494,7 +494,7 @@ def test_server_classifies_readings_and_sends_done_notification(tmp_path):
             "test-secret",
             _calibration_payload(
                 event_id="quiet-final",
-                at=start + timedelta(seconds=610 + 67 * 10),
+                at=start + timedelta(seconds=920),
                 rms=0.8,
                 peak=2.0,
             ),
@@ -504,7 +504,7 @@ def test_server_classifies_readings_and_sends_done_notification(tmp_path):
     assert sent == [
         {
             "title": "Washer done",
-            "message": "No washer motion for 10 min.",
+            "message": "No washer motion for 4 min.",
             "priority": 5,
         }
     ]
@@ -514,7 +514,7 @@ def test_server_classifies_readings_and_sends_done_notification(tmp_path):
             "test-secret",
             _calibration_payload(
                 event_id="quiet-duplicate",
-                at=start + timedelta(seconds=610 + 68 * 10),
+                at=start + timedelta(seconds=930),
                 rms=0.8,
                 peak=2.0,
             ),
@@ -574,7 +574,7 @@ def test_server_done_label_uses_current_cycle_after_previous_notification(tmp_pa
     assert sent == [
         {
             "title": "Washer done",
-            "message": "No washer motion for 10 min.",
+            "message": "No washer motion for 4 min.",
             "priority": 5,
         }
     ]
@@ -625,7 +625,7 @@ def test_server_done_label_uses_current_cycle_after_previous_notification(tmp_pa
     assert sent == [
         {
             "title": "Dryer done",
-            "message": "No dryer motion for 10 min.",
+            "message": "No dryer motion for 4 min.",
             "priority": 5,
         }
     ]

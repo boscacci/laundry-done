@@ -46,7 +46,7 @@ The server's fallback completion detector only uses the current connected device
 session. A reboot, uptime reset, or reporting gap longer than three minutes
 discards earlier motion evidence and resets its smoothing window. Missing packets
 are **not** quiet readings. Before sending an inferred completion alert, it needs
-at least eight minutes of adjacent observed activity, followed by ten minutes of
+at least eight minutes of adjacent observed activity, followed by four minutes of
 observed quiet (plus classifier smoothing). Brief setup movement cannot satisfy
 the runtime requirement merely by sitting still afterward. The existing explicit
 firmware `done_sent` notification path is unchanged by these server safeguards.
