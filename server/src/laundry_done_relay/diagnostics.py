@@ -11,6 +11,7 @@ DIAGNOSTIC_FIELDS = (
     "reset_reason",
     "detector_state",
     "startup_keep_awake",
+    "startup_settling",
     "light_sleep_enabled",
     "last_nap_requested_ms",
     "last_light_sleep_result",

@@ -2,6 +2,9 @@
 
 #include "laundry_detector.h"
 
+void setUp() {}
+void tearDown() {}
+
 static MotionWindow quiet(unsigned long at_ms) {
   return MotionWindow{at_ms, 4, 0.9f, 2.0f};
 }
@@ -310,7 +313,7 @@ void test_startup_keep_awake_uses_short_idle_poll_during_manual_battery_wake_win
 void test_default_telemetry_cadence_lets_power_bank_auto_off_when_idle() {
   const TelemetryCadenceConfig config;
 
-  TEST_ASSERT_EQUAL(10UL * 60UL * 1000UL, config.startup_keep_awake_ms);
+  TEST_ASSERT_EQUAL(15UL * 60UL * 1000UL, config.startup_keep_awake_ms);
   TEST_ASSERT_EQUAL(10UL * 1000UL, config.startup_poll_ms);
   TEST_ASSERT_EQUAL(2UL * 60UL * 1000UL, config.idle_poll_ms);
   TEST_ASSERT_EQUAL(10UL * 1000UL, config.running_poll_ms);
@@ -326,7 +329,7 @@ void test_default_telemetry_cadence_lets_power_bank_auto_off_when_idle() {
       telemetry_poll_ms(9UL * 60UL * 1000UL, DetectorState::Idle, config));
   TEST_ASSERT_EQUAL(
       config.idle_poll_ms,
-      telemetry_poll_ms(10UL * 60UL * 1000UL + 1UL, DetectorState::Idle, config));
+      telemetry_poll_ms(config.startup_keep_awake_ms + 1UL, DetectorState::Idle, config));
   TEST_ASSERT_EQUAL(
       config.running_poll_ms,
       telemetry_poll_ms(10UL * 60UL * 1000UL, DetectorState::QuietCandidate, config));
@@ -527,8 +530,47 @@ void test_aligned_wall_clock_nap_targets_next_interval_boundary() {
   TEST_ASSERT_EQUAL(10000UL, aligned_wall_clock_nap_ms(30, 10000UL));
 }
 
+void test_startup_ignores_handling_then_waits_through_quiet_fill() {
+  const TelemetryCadenceConfig config;
+  LaundryDetector detector(telemetry_cadence_detector_config());
+  for (unsigned long t = 0; t < config.startup_settle_ms; t += 10000UL) {
+    Decision result = observe_after_startup_settle(detector, washer(t), config);
+    TEST_ASSERT_EQUAL(DetectorState::Idle, result.state);
+    TEST_ASSERT_FALSE(result.should_post);
+    TEST_ASSERT_TRUE(startup_keeps_radio_awake(t, config));
+  }
+  for (unsigned long t = config.startup_settle_ms; t < 4UL * 60000UL; t += 10000UL) {
+    Decision result = observe_after_startup_settle(detector, quiet(t), config);
+    TEST_ASSERT_EQUAL(DetectorState::Idle, result.state);
+    TEST_ASSERT_FALSE(result.should_post);
+    TEST_ASSERT_TRUE(startup_keeps_radio_awake(t, config));
+  }
+  Decision first = observe_after_startup_settle(detector, bedding_wash(4UL * 60000UL), config);
+  TEST_ASSERT_EQUAL(DetectorState::MotionConfirming, first.state);
+  Decision confirmed = observe_after_startup_settle(detector, bedding_wash(4UL * 60000UL + 30000UL), config);
+  TEST_ASSERT_EQUAL(DetectorState::CycleRunning, confirmed.state);
+  TEST_ASSERT_FALSE(confirmed.should_post);
+}
+
+void test_startup_settling_and_awake_window_boundaries() {
+  const TelemetryCadenceConfig config;
+  LaundryDetector detector(telemetry_cadence_detector_config());
+  TEST_ASSERT_EQUAL(DetectorState::Idle,
+      observe_after_startup_settle(detector, washer(config.startup_settle_ms - 1UL), config).state);
+  TEST_ASSERT_EQUAL(DetectorState::MotionConfirming,
+      observe_after_startup_settle(detector, washer(config.startup_settle_ms), config).state);
+  TEST_ASSERT_TRUE(startup_keeps_radio_awake(config.startup_keep_awake_ms - 1UL, config));
+  TEST_ASSERT_FALSE(startup_keeps_radio_awake(config.startup_keep_awake_ms, config));
+  TEST_ASSERT_EQUAL(config.idle_poll_ms,
+      telemetry_poll_ms(config.startup_keep_awake_ms, DetectorState::Idle, config));
+  TEST_ASSERT_EQUAL(config.running_poll_ms,
+      telemetry_poll_ms(config.startup_keep_awake_ms, DetectorState::CycleRunning, config));
+}
+
 int main(int argc, char **argv) {
   UNITY_BEGIN();
+  RUN_TEST(test_startup_ignores_handling_then_waits_through_quiet_fill);
+  RUN_TEST(test_startup_settling_and_awake_window_boundaries);
   RUN_TEST(test_washer_cycle_alerts_once_after_quiet_period);
   RUN_TEST(test_dryer_after_washer_is_labeled_dryer);
   RUN_TEST(test_ambiguous_tandem_motion_gets_stack_label);

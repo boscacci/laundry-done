@@ -46,7 +46,8 @@ struct Decision {
 };
 
 struct TelemetryCadenceConfig {
-  unsigned long startup_keep_awake_ms = 10UL * 60UL * 1000UL;
+  unsigned long startup_settle_ms = 30UL * 1000UL;
+  unsigned long startup_keep_awake_ms = 15UL * 60UL * 1000UL;
   unsigned long startup_poll_ms = 10UL * 1000UL;
   unsigned long idle_poll_ms = 2UL * 60UL * 1000UL;
   unsigned long running_poll_ms = 10UL * 1000UL;
@@ -146,6 +147,11 @@ private:
 };
 
 DetectorConfig telemetry_cadence_detector_config();
+
+bool startup_keeps_radio_awake(unsigned long now_ms, const TelemetryCadenceConfig &config);
+Decision observe_after_startup_settle(LaundryDetector &detector,
+                                      const MotionWindow &window,
+                                      const TelemetryCadenceConfig &config);
 
 WifiPowerPolicy brownout_resistant_wifi_policy();
 

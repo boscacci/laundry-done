@@ -54,9 +54,13 @@ firmware `done_sent` notification path is unchanged by these server safeguards.
 If the dashboard says there are no recent packets, check the device's power bank
 and Wi-Fi; a reachable dashboard alone does not mean a load is being monitored.
 
-The current production firmware uses a 10-second cadence for the first 10
-minutes after boot so a freshly woken USB power bank stays alive while you start
-the washer or dryer. After that, idle/done states use a 2-minute light-sleep nap
+The updated sketch ignores movement in its local detector for the first 30 seconds
+after power-on, allowing the puck to settle. It then waits for the washer to start
+moving, checking every 10 seconds. For the first 15 minutes after boot it stays
+awake with Wi-Fi between checks, including while the washer fills quietly. This
+replaces the earlier startup light-sleep behavior and requires a USB firmware flash;
+updating the server alone does not change the device. Battery-bank compatibility
+still needs verification on the actual bank. After that, idle/done states use a 2-minute light-sleep nap
 with no keep-alive pulse, which lets the HyperGear bank auto-off instead of
 running forever after laundry is finished. It returns to a 10-second cadence
 during motion and the done-confirmation quiet window, and active cycles run an

@@ -415,7 +415,7 @@ void enable_low_power_wifi_station() {
 }
 
 bool battery_keep_awake_active() {
-  return millis() < kTelemetryCadence.startup_keep_awake_ms;
+  return startup_keeps_radio_awake(millis(), kTelemetryCadence);
 }
 
 void maybe_sleep_wifi() {
@@ -463,6 +463,10 @@ void power_bank_keepalive_pulse(unsigned long duration_ms, unsigned long remaini
 }
 
 void maybe_active_cycle_load_pulse(DetectorState state, unsigned long *nap_ms) {
+  // During startup the radio remains connected between packets already.
+  if (battery_keep_awake_active()) {
+    return;
+  }
   const unsigned long pulse_ms = active_cycle_load_pulse_ms(
       millis(),
       state,
@@ -487,6 +491,11 @@ void maybe_active_cycle_load_pulse(DetectorState state, unsigned long *nap_ms) {
 void nap(unsigned long nap_ms, DetectorState state) {
   last_nap_requested_ms = nap_ms;
   if (nap_ms == 0) {
+    return;
+  }
+  if (battery_keep_awake_active()) {
+    Serial.printf("sleep mode=startup_awake duration_ms=%lu\n", nap_ms);
+    delay(nap_ms);
     return;
   }
 #if LAUNDRY_USE_LIGHT_SLEEP
@@ -663,6 +672,7 @@ bool post_calibration_sample_event(uint32_t event_counter,
   diagnostics["reset_reason"] = static_cast<int>(esp_reset_reason());
   diagnostics["detector_state"] = detector_state_to_string(telemetry_cadence_detector.state());
   diagnostics["startup_keep_awake"] = battery_keep_awake_active();
+  diagnostics["startup_settling"] = window.at_ms < kTelemetryCadence.startup_settle_ms;
   diagnostics["light_sleep_enabled"] = LAUNDRY_USE_LIGHT_SLEEP != 0;
   diagnostics["last_nap_requested_ms"] = last_nap_requested_ms;
   diagnostics["last_light_sleep_result"] = last_light_sleep_result;
@@ -1184,7 +1194,8 @@ void loop() {
   const unsigned long sample_started_ms = millis();
   const time_t sample_epoch_seconds = time(nullptr);
   MotionWindow window = sample_motion_window();
-  Decision cadence_decision = telemetry_cadence_detector.observe(window);
+  Decision cadence_decision = observe_after_startup_settle(
+      telemetry_cadence_detector, window, kTelemetryCadence);
 
   Serial.printf("motion rms_mg=%.2f peak_mg=%.2f telemetry_state=%s telemetry_label=%s classification=server\n",
                 window.rms_mg,

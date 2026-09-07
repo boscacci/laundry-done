@@ -226,6 +226,20 @@ WifiPowerPolicy brownout_resistant_wifi_policy() {
   return WifiPowerPolicy{};
 }
 
+bool startup_keeps_radio_awake(unsigned long now_ms, const TelemetryCadenceConfig &config) {
+  return now_ms < config.startup_keep_awake_ms;
+}
+
+Decision observe_after_startup_settle(LaundryDetector &detector,
+                                      const MotionWindow &window,
+                                      const TelemetryCadenceConfig &config) {
+  if (window.at_ms < config.startup_settle_ms) {
+    detector.reset();
+    return Decision{};
+  }
+  return detector.observe(window);
+}
+
 unsigned long telemetry_poll_ms(unsigned long now_ms,
                                 DetectorState state,
                                 const TelemetryCadenceConfig &config) {

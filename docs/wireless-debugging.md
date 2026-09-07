@@ -19,7 +19,7 @@ packets show `reset_reason_name: unavailable` until diagnostic firmware is flash
 New diagnostic fields include:
 
 - Reset reason: power-on, brownout, watchdog, software restart, or panic.
-- Detector state, startup keep-awake flag, and whether light sleep is enabled.
+- Detector state, startup settling/keep-awake flags, and whether light sleep is enabled.
 - Previous requested nap and last light-sleep return code (`-1` means unattempted).
 - Completed keepalive count and uptime at the last completed pulse.
 - Successful/failed sample uploads and the previous sample's HTTP status
@@ -32,11 +32,14 @@ Loss of power prevents a final report. The next successful boot can report its
 reset cause; a power-on indication alone does not identify the cable, battery
 bank, or reset pin as the cause. There is no voltage/current sensor in this build.
 
-The existing startup window is ten minutes, but the production firmware still
-turns Wi-Fi off and light-sleeps between samples during that window. Its load
-pulses may not satisfy a particular power bank's minimum-load requirements. Logs
-help distinguish an intentional long nap from repeated reboots; compare USB
-power and battery-bank runs before choosing a power-policy change.
+The updated startup window is fifteen minutes. The local detector ignores the
+first thirty seconds of movement, then watches for a start while the washer fills.
+During the startup window it keeps the CPU and Wi-Fi awake between ten-second
+samples; startup load pulses are skipped because they disconnect the radio.
+The earlier firmware used light sleep even during its ten-minute startup window.
+The new firmware still needs a USB flash and an actual battery-bank test: awake
+operation does not establish the bank's minimum-load threshold. Logs help
+distinguish an intentional long nap from repeated reboots.
 
 For the first flash, connect the ESP32 by USB to the laptop. After it is flashed,
 return it to the battery bank for remote diagnostics. USB-powered tests alone
