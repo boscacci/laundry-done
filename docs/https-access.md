@@ -42,23 +42,31 @@ with Route53 DNS-01:
 docker compose up -d --build caddy
 ```
 
-The Optiplex tailnet `80/443` front door is shared with other private services.
-The live front door is the host-network `optiplex-front-door` nginx container,
-configured in:
+The Optiplex tailnet `443` front door is shared with other private services.
+Tailscale Serve forwards raw TCP to the loopback SNI listener:
+
+```text
+TCP 443 -> 127.0.0.1:9444
+```
+
+The listener belongs to the host-network `optiplex-front-door` nginx container.
+Its source configuration and idempotent Tailscale route setup are:
 
 ```bash
-/home/rob/optiplex-front-door/nginx.conf
+/home/rob/repos/rc/optiplex/front-door/nginx.conf.template
+/home/rob/repos/rc/optiplex/front-door/configure-tailnet-tls-front-door.sh
 ```
 
 It routes by SNI:
 
 ```text
 laundry.robertboscacci.com  -> 127.0.0.1:8444  # Caddy TLS passthrough
+photos.robertboscacci.com   -> 127.0.0.1:9445  # PhotoPrism Caddy
 vhf-dev.robertboscacci.com  -> 127.0.0.1:9443  # nginx TLS termination
 ```
 
-Port 80 exists only to catch accidental `http://` browser visits and redirect
-them to HTTPS. HTTPS port `443` must remain free for this nginx listener.
+The same nginx container owns LAN port `443`. Its port `80` listener catches
+accidental `http://` visits and redirects them to HTTPS.
 
 ## Gotify Funnel
 
@@ -70,9 +78,11 @@ tailscale funnel --bg --https=10000 --set-path=/gotify --yes 127.0.0.1:8089
 tailscale funnel status
 ```
 
-Do not use Funnel or Serve on HTTPS `443` for Gotify. If Tailscale owns `443`,
-tailnet clients connecting to `laundry.robertboscacci.com` can hit a TLS alert
-before the request reaches nginx/Caddy. Firefox reports that as:
+Do not configure Tailscale HTTPS termination on `443` for Gotify. Tailnet port
+`443` must remain a raw TCP forward to the shared nginx listener on `9444`.
+Pointing it directly at one application's Caddy port, such as PhotoPrism on
+`9445`, makes the other custom hostnames fail before their certificates can be
+presented. Firefox can report that as:
 
 ```text
 SSL_ERROR_INTERNAL_ERROR_ALERT
