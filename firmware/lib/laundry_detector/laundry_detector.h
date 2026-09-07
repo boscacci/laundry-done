@@ -47,7 +47,8 @@ struct Decision {
 
 struct TelemetryCadenceConfig {
   unsigned long startup_settle_ms = 30UL * 1000UL;
-  unsigned long startup_keep_awake_ms = 15UL * 60UL * 1000UL;
+  // Keep the bank available for an initial start, not the CPU/radio continuously on.
+  unsigned long startup_keep_awake_ms = 5UL * 60UL * 1000UL;
   unsigned long startup_poll_ms = 10UL * 1000UL;
   unsigned long idle_poll_ms = 2UL * 60UL * 1000UL;
   unsigned long running_poll_ms = 10UL * 1000UL;
@@ -149,6 +150,8 @@ private:
 DetectorConfig telemetry_cadence_detector_config();
 
 bool startup_keeps_radio_awake(unsigned long now_ms, const TelemetryCadenceConfig &config);
+bool wireless_update_allowed(unsigned long now_ms, DetectorState state,
+                             const TelemetryCadenceConfig &config);
 Decision observe_after_startup_settle(LaundryDetector &detector,
                                       const MotionWindow &window,
                                       const TelemetryCadenceConfig &config);

@@ -15,6 +15,7 @@
 #include <Adafruit_Sensor.h>
 
 #include "laundry_detector.h"
+#include "laundry_ota.h"
 
 #if __has_include("laundry_config.h")
 #include "laundry_config.h"
@@ -683,6 +684,7 @@ bool post_calibration_sample_event(uint32_t event_counter,
   diagnostics["previous_sample_http_status"] = previous_sample_http_status;
   diagnostics["free_heap_bytes"] = ESP.getFreeHeap();
   diagnostics["min_free_heap_bytes"] = ESP.getMinFreeHeap();
+  laundry_ota::diagnostics(diagnostics);
   const String device_time = format_utc(sample_epoch_seconds);
   if (device_time.length() > 0) {
     doc["device_time_utc"] = device_time;
@@ -698,6 +700,10 @@ bool post_calibration_sample_event(uint32_t event_counter,
   blink_transmit_led();
   const int status = http.POST(body);
   previous_sample_http_status = status;
+  String response_body;
+  if (status == 202 && http.getSize() > 0 && http.getSize() <= 2048) {
+    response_body = http.getString();
+  }
   if (status >= 200 && status < 300) {
     sample_post_successes++;
   } else {
@@ -710,6 +716,14 @@ bool post_calibration_sample_event(uint32_t event_counter,
                 window.peak_mg,
                 WiFi.status() == WL_CONNECTED ? WiFi.RSSI() : -127);
   http.end();
+  if (!response_body.isEmpty()) {
+    JsonDocument response;
+    if (!deserializeJson(response, response_body)) {
+      laundry_ota::handle_offer(response["ota"], event_id,
+          wireless_update_allowed(millis(), telemetry_cadence_detector.state(), kTelemetryCadence),
+          RELAY_URL, DEVICE_ID, DEVICE_SECRET);
+    }
+  }
   maybe_sleep_wifi();
   return status >= 200 && status < 300;
 }
@@ -1174,6 +1188,7 @@ void setup() {
   boot_id = make_boot_id();
   Serial.printf("sensor_type=%s\n", motion_sensor_to_string(motion_sensor));
   telemetry_run_id = String("production-") + String(DEVICE_ID) + "-" + boot_id;
+  laundry_ota::begin();
   Serial.printf("telemetry_enabled=true run_id=%s sample_window_ms=%lu poll_ms=%lu battery_keep_awake_ms=%lu battery_keep_awake_poll_ms=%lu idle_poll_ms=%lu battery_keepalive_interval_ms=%lu battery_keepalive_pulse_ms=%lu active_load_pulse_interval_ms=%lu active_load_pulse_ms=%lu battery_keepalive_mode=%s cpu_mhz=%u classifier=server\n",
                 telemetry_run_id.c_str(),
                 kSampleWindowMs,

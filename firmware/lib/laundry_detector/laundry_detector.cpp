@@ -227,7 +227,13 @@ WifiPowerPolicy brownout_resistant_wifi_policy() {
 }
 
 bool startup_keeps_radio_awake(unsigned long now_ms, const TelemetryCadenceConfig &config) {
-  return now_ms < config.startup_keep_awake_ms;
+  return now_ms < config.startup_settle_ms && now_ms < config.startup_keep_awake_ms;
+}
+
+bool wireless_update_allowed(unsigned long now_ms, DetectorState state,
+                             const TelemetryCadenceConfig &config) {
+  return now_ms >= config.startup_settle_ms &&
+         (state == DetectorState::Idle || state == DetectorState::DoneSent);
 }
 
 Decision observe_after_startup_settle(LaundryDetector &detector,
@@ -321,7 +327,8 @@ unsigned long active_cycle_load_pulse_ms(unsigned long now_ms,
   if (config.active_load_pulse_interval_ms == 0 || config.active_load_pulse_ms == 0) {
     return 0;
   }
-  if (state == DetectorState::Idle || state == DetectorState::DoneSent) {
+  if (state == DetectorState::DoneSent ||
+      (state == DetectorState::Idle && now_ms >= config.startup_keep_awake_ms)) {
     return 0;
   }
   if (now_ms - last_pulse_ms < config.active_load_pulse_interval_ms) {

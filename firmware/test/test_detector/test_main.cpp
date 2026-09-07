@@ -1,4 +1,5 @@
 #include <unity.h>
+#include <initializer_list>
 
 #include "laundry_detector.h"
 
@@ -313,7 +314,7 @@ void test_startup_keep_awake_uses_short_idle_poll_during_manual_battery_wake_win
 void test_default_telemetry_cadence_lets_power_bank_auto_off_when_idle() {
   const TelemetryCadenceConfig config;
 
-  TEST_ASSERT_EQUAL(15UL * 60UL * 1000UL, config.startup_keep_awake_ms);
+  TEST_ASSERT_EQUAL(5UL * 60UL * 1000UL, config.startup_keep_awake_ms);
   TEST_ASSERT_EQUAL(10UL * 1000UL, config.startup_poll_ms);
   TEST_ASSERT_EQUAL(2UL * 60UL * 1000UL, config.idle_poll_ms);
   TEST_ASSERT_EQUAL(10UL * 1000UL, config.running_poll_ms);
@@ -326,7 +327,7 @@ void test_default_telemetry_cadence_lets_power_bank_auto_off_when_idle() {
 
   TEST_ASSERT_EQUAL(
       config.startup_poll_ms,
-      telemetry_poll_ms(9UL * 60UL * 1000UL, DetectorState::Idle, config));
+      telemetry_poll_ms(config.startup_keep_awake_ms - 1UL, DetectorState::Idle, config));
   TEST_ASSERT_EQUAL(
       config.idle_poll_ms,
       telemetry_poll_ms(config.startup_keep_awake_ms + 1UL, DetectorState::Idle, config));
@@ -426,13 +427,13 @@ void test_active_cycle_load_pulse_runs_before_forty_second_power_bank_cutoff() {
           config));
 }
 
-void test_active_cycle_load_pulse_skips_idle_and_done_states() {
+void test_active_cycle_load_pulse_skips_expired_startup_and_done_states() {
   const TelemetryCadenceConfig config;
 
   TEST_ASSERT_EQUAL(
       0UL,
       active_cycle_load_pulse_ms(
-          config.active_load_pulse_interval_ms * 3UL,
+          config.startup_keep_awake_ms,
           DetectorState::Idle,
           0UL,
           config));
@@ -543,7 +544,9 @@ void test_startup_ignores_handling_then_waits_through_quiet_fill() {
     Decision result = observe_after_startup_settle(detector, quiet(t), config);
     TEST_ASSERT_EQUAL(DetectorState::Idle, result.state);
     TEST_ASSERT_FALSE(result.should_post);
-    TEST_ASSERT_TRUE(startup_keeps_radio_awake(t, config));
+    TEST_ASSERT_FALSE(startup_keeps_radio_awake(t, config));
+    TEST_ASSERT_TRUE(battery_keepalive_allowed(t, result.state, config));
+    TEST_ASSERT_EQUAL(config.startup_poll_ms, telemetry_poll_ms(t, result.state, config));
   }
   Decision first = observe_after_startup_settle(detector, bedding_wash(4UL * 60000UL), config);
   TEST_ASSERT_EQUAL(DetectorState::MotionConfirming, first.state);
@@ -559,16 +562,54 @@ void test_startup_settling_and_awake_window_boundaries() {
       observe_after_startup_settle(detector, washer(config.startup_settle_ms - 1UL), config).state);
   TEST_ASSERT_EQUAL(DetectorState::MotionConfirming,
       observe_after_startup_settle(detector, washer(config.startup_settle_ms), config).state);
-  TEST_ASSERT_TRUE(startup_keeps_radio_awake(config.startup_keep_awake_ms - 1UL, config));
-  TEST_ASSERT_FALSE(startup_keeps_radio_awake(config.startup_keep_awake_ms, config));
+  TEST_ASSERT_TRUE(startup_keeps_radio_awake(config.startup_settle_ms - 1UL, config));
+  TEST_ASSERT_FALSE(startup_keeps_radio_awake(config.startup_settle_ms, config));
+  TEST_ASSERT_FALSE(startup_keeps_radio_awake(config.startup_keep_awake_ms - 1UL, config));
   TEST_ASSERT_EQUAL(config.idle_poll_ms,
       telemetry_poll_ms(config.startup_keep_awake_ms, DetectorState::Idle, config));
   TEST_ASSERT_EQUAL(config.running_poll_ms,
       telemetry_poll_ms(config.startup_keep_awake_ms, DetectorState::CycleRunning, config));
 }
 
-int main(int argc, char **argv) {
+void test_waiting_for_initial_motion_uses_bounded_keepalive_not_continuous_radio() {
+  const TelemetryCadenceConfig config;
+  const unsigned long waiting_ms = 2UL * 60000UL;
+  TEST_ASSERT_FALSE(startup_keeps_radio_awake(waiting_ms, config));
+  TEST_ASSERT_EQUAL(config.active_load_pulse_ms,
+      active_cycle_load_pulse_ms(waiting_ms, DetectorState::Idle, 0, config));
+  TEST_ASSERT_EQUAL(0UL,
+      active_cycle_load_pulse_ms(waiting_ms, DetectorState::Idle, waiting_ms, config));
+  TEST_ASSERT_EQUAL(0UL,
+      active_cycle_load_pulse_ms(config.startup_keep_awake_ms, DetectorState::Idle, 0, config));
+  TEST_ASSERT_FALSE(battery_keepalive_allowed(config.startup_keep_awake_ms, DetectorState::Idle, config));
+  // Expiring the start allowance must not shut down an established cycle,
+  // including the quiet evidence the server needs before sending an alert.
+  for (DetectorState state : {DetectorState::MotionConfirming,
+                             DetectorState::CycleRunning,
+                             DetectorState::QuietCandidate}) {
+    TEST_ASSERT_TRUE(battery_keepalive_allowed(config.startup_keep_awake_ms, state, config));
+    TEST_ASSERT_EQUAL(config.running_poll_ms,
+        telemetry_poll_ms(config.startup_keep_awake_ms, state, config));
+    TEST_ASSERT_EQUAL(config.active_load_pulse_ms,
+        active_cycle_load_pulse_ms(config.startup_keep_awake_ms, state, 0, config));
+  }
+}
+
+void test_wireless_updates_require_settled_idle_state() {
+  const TelemetryCadenceConfig config;
+  TEST_ASSERT_FALSE(wireless_update_allowed(config.startup_settle_ms - 1UL, DetectorState::Idle, config));
+  TEST_ASSERT_TRUE(wireless_update_allowed(config.startup_settle_ms, DetectorState::Idle, config));
+  TEST_ASSERT_TRUE(wireless_update_allowed(config.startup_settle_ms, DetectorState::DoneSent, config));
+  for (DetectorState state : {DetectorState::MotionConfirming, DetectorState::CycleRunning,
+                             DetectorState::QuietCandidate}) {
+    TEST_ASSERT_FALSE(wireless_update_allowed(config.startup_keep_awake_ms, state, config));
+  }
+}
+
+int main() {
   UNITY_BEGIN();
+  RUN_TEST(test_wireless_updates_require_settled_idle_state);
+  RUN_TEST(test_waiting_for_initial_motion_uses_bounded_keepalive_not_continuous_radio);
   RUN_TEST(test_startup_ignores_handling_then_waits_through_quiet_fill);
   RUN_TEST(test_startup_settling_and_awake_window_boundaries);
   RUN_TEST(test_washer_cycle_alerts_once_after_quiet_period);
@@ -590,7 +631,7 @@ int main(int argc, char **argv) {
   RUN_TEST(test_idle_and_done_naps_do_not_pulse_after_startup_keep_awake_window);
   RUN_TEST(test_running_and_quiet_candidate_naps_still_keep_power_bank_awake);
   RUN_TEST(test_active_cycle_load_pulse_runs_before_forty_second_power_bank_cutoff);
-  RUN_TEST(test_active_cycle_load_pulse_skips_idle_and_done_states);
+  RUN_TEST(test_active_cycle_load_pulse_skips_expired_startup_and_done_states);
   RUN_TEST(test_battery_keepalive_splits_long_idle_nap_with_awake_pulse);
   RUN_TEST(test_battery_keepalive_does_not_split_short_running_nap);
   RUN_TEST(test_cadence_detector_returns_to_idle_after_single_handling_jolt);

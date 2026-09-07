@@ -56,21 +56,29 @@ and Wi-Fi; a reachable dashboard alone does not mean a load is being monitored.
 
 The updated sketch ignores movement in its local detector for the first 30 seconds
 after power-on, allowing the puck to settle. It then waits for the washer to start
-moving, checking every 10 seconds. For the first 15 minutes after boot it stays
-awake with Wi-Fi between checks, including while the washer fills quietly. This
-replaces the earlier startup light-sleep behavior and requires a USB firmware flash;
-updating the server alone does not change the device. Battery-bank compatibility
-still needs verification on the actual bank. After that, idle/done states use a 2-minute light-sleep nap
+moving, checking every 10 seconds for up to five minutes after boot. That is a
+bounded allowance for detecting a start, not an assumed fill time. Continuous
+CPU/radio wakefulness ends after the initial 30 seconds; waiting for movement uses
+light sleep between checks and the same bounded bank-load pulses as an active
+cycle. This requires a USB firmware flash; updating the server alone does not
+change the device. Battery-bank compatibility and actual energy savings still
+need verification on the bank. If no start is detected before the allowance
+expires, idle/done states use a 2-minute light-sleep nap
 with no keep-alive pulse, which lets the HyperGear bank auto-off instead of
 running forever after laundry is finished. It returns to a 10-second cadence
-during motion and the done-confirmation quiet window, and active cycles run an
-8-second low-power Wi-Fi radio load pulse every 25 seconds to stay below the measured
-sub-40-second HyperGear no-load cutoff. It uses NTP timestamps when Wi-Fi is
+during motion and the done-confirmation quiet window, independent of startup
+expiry. Waiting for a start and active cycles run an 8-second low-transmit-power
+Wi-Fi radio load pulse when at least 25 seconds have elapsed since the previous
+pulse completed. These pulses are a provisional bank-compatibility measure, not
+a measured minimum-energy solution or proof of a fixed bank cutoff. The radio
+still consumes power even at low transmit power. It uses NTP timestamps when Wi-Fi is
 available, and keeps the onboard LED off except while transmitting or pulsing
 the power-bank keepalive.
 
 ## Documentation Map
 
+- [Wi-Fi firmware updates](docs/wifi-firmware-updates.md): authenticated, encrypted,
+  on-demand updates without an always-on listener.
 - [Wireless power diagnostics](docs/wireless-debugging.md): inspect remote boots,
   sleep, keepalive activity, and upload failures while testing a battery bank.
 

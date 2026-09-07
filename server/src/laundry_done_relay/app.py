@@ -15,6 +15,8 @@ from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel, Field, ValidationError
 
+from laundry_done_relay.ota import install_ota_routes, offer_update
+
 
 class LaundryEvent(BaseModel):
     device_id: str = Field(min_length=1)
@@ -61,6 +63,7 @@ def create_app(
     monitor_users = monitor_tailscale_users or set()
     monitor_ips = monitor_tailscale_ips or set()
     _init_db(db_path)
+    install_ota_routes(app, db_path, device_secret)
 
     @app.get("/healthz")
     def healthz() -> dict:
@@ -99,7 +102,11 @@ def create_app(
         if not duplicate and event.state == "calibration_sample":
             _maybe_send_server_done(db_path, event, sender)
 
-        return {"accepted": True, "duplicate": duplicate}
+        response = {"accepted": True, "duplicate": duplicate}
+        offer = offer_update(db_path, device_secret, json.loads(body))
+        if offer:
+            response["ota"] = offer
+        return response
 
     @app.get("/api/v1/calibration/events")
     def list_calibration_events(

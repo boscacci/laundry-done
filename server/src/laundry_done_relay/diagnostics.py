@@ -22,6 +22,11 @@ DIAGNOSTIC_FIELDS = (
     "previous_sample_http_status",
     "free_heap_bytes",
     "min_free_heap_bytes",
+    "ota_capable",
+    "firmware_build",
+    "ota_job_id",
+    "ota_result",
+    "installed_sha256",
 )
 RESET_REASONS = {
     0: "unknown",
