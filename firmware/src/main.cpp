@@ -106,6 +106,13 @@ String telemetry_run_id;
 bool clock_configured = false;
 bool clock_synced = false;
 unsigned long last_active_load_pulse_ms = 0;
+unsigned long last_nap_requested_ms = 0;
+unsigned long last_keepalive_completed_ms = 0;
+uint32_t keepalive_completed_count = 0;
+uint32_t sample_post_successes = 0;
+uint32_t sample_post_failures = 0;
+int previous_sample_http_status = 0;
+int last_light_sleep_result = -1;
 LaundryDetector telemetry_cadence_detector(kTelemetryDetectorConfig);
 
 enum class MotionSensor {
@@ -451,6 +458,8 @@ void power_bank_keepalive_pulse(unsigned long duration_ms, unsigned long remaini
   WiFi.mode(WIFI_OFF);
 #endif
   digitalWrite(kLedPin, LOW);
+  keepalive_completed_count++;
+  last_keepalive_completed_ms = millis();
 }
 
 void maybe_active_cycle_load_pulse(DetectorState state, unsigned long *nap_ms) {
@@ -476,6 +485,7 @@ void maybe_active_cycle_load_pulse(DetectorState state, unsigned long *nap_ms) {
 }
 
 void nap(unsigned long nap_ms, DetectorState state) {
+  last_nap_requested_ms = nap_ms;
   if (nap_ms == 0) {
     return;
   }
@@ -491,7 +501,7 @@ void nap(unsigned long nap_ms, DetectorState state) {
       Serial.flush();
       WiFi.mode(WIFI_OFF);
       esp_sleep_enable_timer_wakeup(static_cast<uint64_t>(slice.sleep_ms) * 1000ULL);
-      esp_light_sleep_start();
+      last_light_sleep_result = static_cast<int>(esp_light_sleep_start());
     }
     if (slice.awake_pulse_ms > 0) {
       power_bank_keepalive_pulse(slice.awake_pulse_ms, slice.remaining_after_slice_ms);
@@ -624,6 +634,8 @@ bool post_calibration_sample_event(uint32_t event_counter,
                                    time_t sample_epoch_seconds) {
   if (!connect_wifi()) {
     Serial.println("calibration_post wifi_failed=true");
+    sample_post_failures++;
+    previous_sample_http_status = 0;
     maybe_sleep_wifi();
     return false;
   }
@@ -644,6 +656,23 @@ bool post_calibration_sample_event(uint32_t event_counter,
   doc["sensor_type"] = motion_sensor_to_string(motion_sensor);
   doc["uptime_ms"] = window.at_ms;
   doc["wifi_rssi"] = WiFi.status() == WL_CONNECTED ? WiFi.RSSI() : -127;
+  // Send diagnostics with the existing signed packet. Counters describe
+  // completed attempts before this packet; they reset with each boot.
+  JsonObject diagnostics = doc["diagnostics"].to<JsonObject>();
+  diagnostics["version"] = 1;
+  diagnostics["reset_reason"] = static_cast<int>(esp_reset_reason());
+  diagnostics["detector_state"] = detector_state_to_string(telemetry_cadence_detector.state());
+  diagnostics["startup_keep_awake"] = battery_keep_awake_active();
+  diagnostics["light_sleep_enabled"] = LAUNDRY_USE_LIGHT_SLEEP != 0;
+  diagnostics["last_nap_requested_ms"] = last_nap_requested_ms;
+  diagnostics["last_light_sleep_result"] = last_light_sleep_result;
+  diagnostics["keepalive_completed_count"] = keepalive_completed_count;
+  diagnostics["last_keepalive_completed_ms"] = last_keepalive_completed_ms;
+  diagnostics["sample_post_successes"] = sample_post_successes;
+  diagnostics["sample_post_failures"] = sample_post_failures;
+  diagnostics["previous_sample_http_status"] = previous_sample_http_status;
+  diagnostics["free_heap_bytes"] = ESP.getFreeHeap();
+  diagnostics["min_free_heap_bytes"] = ESP.getMinFreeHeap();
   const String device_time = format_utc(sample_epoch_seconds);
   if (device_time.length() > 0) {
     doc["device_time_utc"] = device_time;
@@ -658,6 +687,12 @@ bool post_calibration_sample_event(uint32_t event_counter,
   http.addHeader("x-laundry-signature", hmac_sha256(body));
   blink_transmit_led();
   const int status = http.POST(body);
+  previous_sample_http_status = status;
+  if (status >= 200 && status < 300) {
+    sample_post_successes++;
+  } else {
+    sample_post_failures++;
+  }
   Serial.printf("calibration_post status=%d event_id=%s rms_mg=%.1f peak_mg=%.1f rssi=%d\n",
                 status,
                 event_id.c_str(),

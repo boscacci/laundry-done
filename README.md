@@ -67,6 +67,9 @@ the power-bank keepalive.
 
 ## Documentation Map
 
+- [Wireless power diagnostics](docs/wireless-debugging.md): inspect remote boots,
+  sleep, keepalive activity, and upload failures while testing a battery bank.
+
 - [Instructable draft](docs/instructable.md): copy-paste friendly article text.
 - [Build guide](docs/build-guide.md): bench wiring, flashing, relay setup, and
   calibration.
