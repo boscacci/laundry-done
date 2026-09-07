@@ -37,19 +37,26 @@ numbers:
 
 The ESP32 signs each event with an HMAC secret before sending it to the relay.
 The relay rejects unsigned traffic, stores calibration samples locally, and asks
-Gotify to notify your phone for finished-cycle events. The relay can classify a
-finished cycle from quiet samples, and the production firmware also sends an
-explicit `done_sent` event when its own cadence detector reaches done so the
-notification does not depend on the sensor staying awake for extra quiet samples.
+Gotify to notify your phone for finished-cycle events. The relay owns completion
+notifications. Production firmware uses its detector only to control sampling and
+power: it continues reporting for five quiet minutes, giving the relay time to
+confirm four minutes of quiet, then releases the battery keepalive.
 
-The server's fallback completion detector only uses the current connected device
+The server's completion detector only uses the current connected device
 session. A reboot, uptime reset, or reporting gap longer than three minutes
 discards earlier motion evidence and resets its smoothing window. Missing packets
 are **not** quiet readings. Before sending an inferred completion alert, it needs
 at least eight minutes of adjacent observed activity, followed by four minutes of
 raw observed quiet while the smoothed classifier also confirms quiet. Brief setup movement cannot satisfy
-the runtime requirement merely by sitting still afterward. The existing explicit
-firmware `done_sent` notification path is unchanged by these server safeguards.
+the runtime requirement merely by sitting still afterward. New production firmware
+does not send an independent `done_sent` that could bypass those safeguards;
+the endpoint remains compatible with older firmware and explicit event tests.
+
+The measured-noise correction recognizes motion above the stationary desk noise
+floor and uses a neutral `Laundry stack stopped` alert. Amplitude alone cannot
+reliably distinguish washer from dryer, especially on a shared frame. See
+[motion classification](docs/motion-classification.md) for measured fixtures,
+candidate thresholds and the stopped-mounted calibration required before rollout.
 
 If the dashboard says there are no recent packets, check the device's power bank
 and Wi-Fi; a reachable dashboard alone does not mean a load is being monitored.
@@ -60,7 +67,7 @@ moving, checking every 10 seconds for up to five minutes after boot. That is a
 bounded allowance for detecting a start, not an assumed fill time. Continuous
 CPU/radio wakefulness ends after the initial 30 seconds; waiting for movement uses
 light sleep between checks and the same bounded bank-load pulses as an active
-cycle. This requires a USB firmware flash; updating the server alone does not
+cycle. This requires a firmware update (USB or bootstrapped Wi-Fi OTA); updating the server alone does not
 change the device. Battery-bank compatibility and actual energy savings still
 need verification on the bank. If no start is detected before the allowance
 expires, idle/done states use a 2-minute light-sleep nap

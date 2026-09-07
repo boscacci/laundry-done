@@ -30,7 +30,12 @@ def _post(client: TestClient, secret: str, payload: dict):
 
 
 def _utc_text(value: datetime) -> str:
-    return value.astimezone(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    return (
+        value.astimezone(timezone.utc)
+        .replace(microsecond=0)
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
 
 
 def _calibration_payload(
@@ -91,7 +96,9 @@ def _classify_with_dashboard_js(tmp_path, samples: list[dict]) -> list[str]:
         + "\n"
         + f"console.log(JSON.stringify(classifySamples({json.dumps(samples)}).map(phase => phase.short)));\n"
     )
-    result = subprocess.run(["node", runner], check=True, capture_output=True, text=True)
+    result = subprocess.run(
+        ["node", runner], check=True, capture_output=True, text=True
+    )
     return json.loads(result.stdout)
 
 
@@ -104,7 +111,9 @@ def _dashboard_js_results(tmp_path, function_names: tuple[str, ...], expression:
         + "\n"
         + f"console.log(JSON.stringify({expression}));\n"
     )
-    result = subprocess.run(["node", runner], check=True, capture_output=True, text=True)
+    result = subprocess.run(
+        ["node", runner], check=True, capture_output=True, text=True
+    )
     return json.loads(result.stdout)
 
 
@@ -390,7 +399,7 @@ def test_calibration_samples_are_stored_without_phone_push_and_can_be_listed(tmp
     assert list_response.status_code == 200
     assert list_response.json()["events"][0]["event_id"] == "cal-evt-1"
     assert list_response.json()["events"][0]["peak_mg"] == 73.2
-    assert list_response.json()["events"][0]["server_phase"] == "washer"
+    assert list_response.json()["events"][0]["server_phase"] == "active"
     assert list_response.json()["notifications"] == []
 
 
@@ -491,33 +500,33 @@ def test_server_classifies_readings_and_sends_done_notification(tmp_path):
 
     final_response = _post(
         client,
-            "test-secret",
-            _calibration_payload(
-                event_id="quiet-final",
-                at=start + timedelta(seconds=850),
-                rms=0.8,
-                peak=2.0,
-            ),
-        )
+        "test-secret",
+        _calibration_payload(
+            event_id="quiet-final",
+            at=start + timedelta(seconds=850),
+            rms=0.8,
+            peak=2.0,
+        ),
+    )
 
     assert final_response.status_code == 202
     assert sent == [
         {
-            "title": "Washer done",
-            "message": "No washer motion for 4 min.",
+            "title": "Laundry stack stopped",
+            "message": "No washer/dryer stack motion for 4 min.",
             "priority": 5,
         }
     ]
 
     duplicate_quiet = _post(
         client,
-            "test-secret",
-            _calibration_payload(
-                event_id="quiet-duplicate",
-                at=start + timedelta(seconds=860),
-                rms=0.8,
-                peak=2.0,
-            ),
+        "test-secret",
+        _calibration_payload(
+            event_id="quiet-duplicate",
+            at=start + timedelta(seconds=860),
+            rms=0.8,
+            peak=2.0,
+        ),
     )
     assert duplicate_quiet.status_code == 202
     assert len(sent) == 1
@@ -529,10 +538,12 @@ def test_server_classifies_readings_and_sends_done_notification(tmp_path):
 
     assert list_response.status_code == 200
     assert list_response.json()["notifications"][0]["state"] == "done_sent"
-    assert list_response.json()["notifications"][0]["title"] == "Washer done"
+    assert list_response.json()["notifications"][0]["title"] == "Laundry stack stopped"
 
 
-def test_server_done_label_uses_current_cycle_after_previous_notification(tmp_path):
+def test_server_completion_rearms_for_current_cycle_after_previous_notification(
+    tmp_path,
+):
     sent = []
     database_path = tmp_path / "events.sqlite3"
     app = create_app(
@@ -543,7 +554,9 @@ def test_server_done_label_uses_current_cycle_after_previous_notification(tmp_pa
         push_message=lambda message: sent.append(message),
     )
     client = TestClient(app)
-    washer_start = datetime.now(timezone.utc).replace(microsecond=0) - timedelta(hours=4)
+    washer_start = datetime.now(timezone.utc).replace(microsecond=0) - timedelta(
+        hours=4
+    )
 
     for index in range(61):
         response = _post(
@@ -573,8 +586,8 @@ def test_server_done_label_uses_current_cycle_after_previous_notification(tmp_pa
 
     assert sent == [
         {
-            "title": "Washer done",
-            "message": "No washer motion for 4 min.",
+            "title": "Laundry stack stopped",
+            "message": "No washer/dryer stack motion for 4 min.",
             "priority": 5,
         }
     ]
@@ -615,7 +628,8 @@ def test_server_done_label_uses_current_cycle_after_previous_notification(tmp_pa
             "test-secret",
             _calibration_payload(
                 event_id=f"dryer-quiet-{index}",
-                at=dryer_start + timedelta(seconds=len(dryer_readings) * 10 + index * 10),
+                at=dryer_start
+                + timedelta(seconds=len(dryer_readings) * 10 + index * 10),
                 rms=0.8,
                 peak=2.0,
             ),
@@ -624,8 +638,8 @@ def test_server_done_label_uses_current_cycle_after_previous_notification(tmp_pa
 
     assert sent == [
         {
-            "title": "Dryer done",
-            "message": "No dryer motion for 4 min.",
+            "title": "Laundry stack stopped",
+            "message": "No washer/dryer stack motion for 4 min.",
             "priority": 5,
         }
     ]
@@ -650,8 +664,16 @@ def test_calibration_listing_can_filter_handling_noise_by_peak(tmp_path):
         "sample_window_ms": 4000,
         "sample_count": 100,
     }
-    _post(client, "test-secret", {**base_payload, "event_id": "real-motion", "peak_mg": 12.0})
-    _post(client, "test-secret", {**base_payload, "event_id": "handling-noise", "peak_mg": 73.2})
+    _post(
+        client,
+        "test-secret",
+        {**base_payload, "event_id": "real-motion", "peak_mg": 12.0},
+    )
+    _post(
+        client,
+        "test-secret",
+        {**base_payload, "event_id": "handling-noise", "peak_mg": 73.2},
+    )
 
     response = client.get(
         "/api/v1/calibration/events?max_peak_mg=40",
@@ -681,10 +703,18 @@ def test_calibration_listing_filters_noise_before_applying_limit(tmp_path):
         "sample_window_ms": 4000,
         "sample_count": 100,
     }
-    _post(client, "test-secret", {**base_payload, "event_id": "good-1", "peak_mg": 12.0})
-    _post(client, "test-secret", {**base_payload, "event_id": "good-2", "peak_mg": 13.0})
-    _post(client, "test-secret", {**base_payload, "event_id": "noise-1", "peak_mg": 500.0})
-    _post(client, "test-secret", {**base_payload, "event_id": "noise-2", "peak_mg": 600.0})
+    _post(
+        client, "test-secret", {**base_payload, "event_id": "good-1", "peak_mg": 12.0}
+    )
+    _post(
+        client, "test-secret", {**base_payload, "event_id": "good-2", "peak_mg": 13.0}
+    )
+    _post(
+        client, "test-secret", {**base_payload, "event_id": "noise-1", "peak_mg": 500.0}
+    )
+    _post(
+        client, "test-secret", {**base_payload, "event_id": "noise-2", "peak_mg": 600.0}
+    )
 
     response = client.get(
         "/api/v1/calibration/events?limit=2&max_peak_mg=300",
@@ -692,10 +722,15 @@ def test_calibration_listing_filters_noise_before_applying_limit(tmp_path):
     )
 
     assert response.status_code == 200
-    assert [event["event_id"] for event in response.json()["events"]] == ["good-2", "good-1"]
+    assert [event["event_id"] for event in response.json()["events"]] == [
+        "good-2",
+        "good-1",
+    ]
 
 
-def test_calibration_listing_can_return_two_week_history_above_previous_ui_cap(tmp_path):
+def test_calibration_listing_can_return_two_week_history_above_previous_ui_cap(
+    tmp_path,
+):
     app = create_app(
         database_path=tmp_path / "events.sqlite3",
         device_secret="test-secret",
@@ -716,7 +751,9 @@ def test_calibration_listing_can_return_two_week_history_above_previous_ui_cap(t
         "peak_mg": 12.0,
     }
     for index in range(1002):
-        _post(client, "test-secret", {**base_payload, "event_id": f"sample-{index:04d}"})
+        _post(
+            client, "test-secret", {**base_payload, "event_id": f"sample-{index:04d}"}
+        )
 
     response = client.get(
         "/api/v1/calibration/events?limit=1002&days=14&max_peak_mg=300",
@@ -749,7 +786,9 @@ def test_calibration_listing_expires_events_after_14_days(tmp_path):
         "sample_window_ms": 4000,
         "sample_count": 100,
     }
-    _post(client, "test-secret", {**base_payload, "event_id": "expired", "peak_mg": 12.0})
+    _post(
+        client, "test-secret", {**base_payload, "event_id": "expired", "peak_mg": 12.0}
+    )
     _post(client, "test-secret", {**base_payload, "event_id": "fresh", "peak_mg": 13.0})
     with sqlite3.connect(database_path) as conn:
         conn.execute(
@@ -766,7 +805,8 @@ def test_calibration_listing_expires_events_after_14_days(tmp_path):
     assert [event["event_id"] for event in response.json()["events"]] == ["fresh"]
     with sqlite3.connect(database_path) as conn:
         remaining_event_ids = [
-            row[0] for row in conn.execute("SELECT event_id FROM events ORDER BY event_id")
+            row[0]
+            for row in conn.execute("SELECT event_id FROM events ORDER BY event_id")
         ]
     assert remaining_event_ids == ["fresh"]
 
@@ -907,10 +947,9 @@ def test_monitor_page_serves_realtime_dashboard(tmp_path):
     assert "Phase backgrounds" in response.text
     assert "Best guess" in response.text
     assert "Vibration strength" in response.text
-    assert "Washer running" in response.text
-    assert "Washer-like value pattern" in response.text
-    assert "Dryer running" in response.text
-    assert "Sustained mid-level tumble pattern" in response.text
+    assert "Laundry motion" in response.text
+    assert "washer versus dryer is not established" in response.text
+    assert "Washer-like value pattern" not in response.text
     assert "classifySamples" in response.text
     assert "Arduino Wi-Fi" in response.text
     assert "Wake state" in response.text
@@ -955,10 +994,9 @@ def test_monitor_page_serves_realtime_dashboard(tmp_path):
     assert "startLiveUpdates" in response.text
     assert "startLiveUpdates();" in response.text
     assert "if (maxValue <= 5) return 5" in response.text
-    assert "rms <= 5 && peak <= 8" in response.text
-    assert "washerValueCandidate = (rms >= 2.3 && rms <= 8 && peak >= 8 && peak <= 35) || rms >= 28 || peak >= 65" in response.text
-    assert "dryerValueCandidate = rms >= 12 && rms <= 28 && peak >= 25 && peak <= 65" in response.text
-    assert "recentWasherAge < 6" in response.text
+    assert "rms <= 3.5" in response.text
+    assert "rms >= 4.0 || peak >= 20.0" in response.text
+    assert "recentWasherAge" not in response.text
     assert "ping-countdown" in response.text
     assert "conic-gradient" in response.text
     assert "estimateSampleCadenceMs" in response.text
@@ -1004,12 +1042,12 @@ def test_monitor_root_redirects_to_dashboard(tmp_path):
     assert head_response.headers["location"] == "/monitor"
 
 
-def test_dashboard_classifier_uses_accelerometer_values_without_handoff(tmp_path):
-    washer_samples = [{"motion_rms_mg": 2.6, "peak_mg": 15.2} for _ in range(8)]
+def test_dashboard_classifier_does_not_infer_appliance_from_amplitude(tmp_path):
+    noise_samples = [{"motion_rms_mg": 2.6, "peak_mg": 15.2} for _ in range(8)]
     dryer_samples = [{"motion_rms_mg": 22.0, "peak_mg": 50.0} for _ in range(8)]
 
-    assert _classify_with_dashboard_js(tmp_path, washer_samples)[-1] == "washer"
-    assert _classify_with_dashboard_js(tmp_path, dryer_samples)[-1] == "dryer"
+    assert _classify_with_dashboard_js(tmp_path, noise_samples)[-1] == "quiet"
+    assert _classify_with_dashboard_js(tmp_path, dryer_samples)[-1] == "active"
 
 
 def test_dashboard_formats_stale_check_in_age_as_days_and_hours(tmp_path):
@@ -1032,7 +1070,7 @@ def test_dashboard_classifier_uses_eight_sample_smoothed_values(tmp_path):
         {"motion_rms_mg": 22.0, "peak_mg": 45.0},
     ]
 
-    assert _classify_with_dashboard_js(tmp_path, samples)[-1] == "quiet"
+    assert _classify_with_dashboard_js(tmp_path, samples)[-1] == "settling"
 
 
 def test_dashboard_prefers_server_classification_fields(tmp_path):

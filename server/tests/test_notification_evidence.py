@@ -82,8 +82,8 @@ def test_current_observed_cycle_notifies_once_after_four_minutes_quiet(monitor):
     assert monitor[1] == []
     reading(monitor, 850)
     assert len(monitor[1]) == 1
-    assert monitor[1][0]["title"] == "Washer done"
-    assert monitor[1][0]["message"] == "No washer motion for 4 min."
+    assert monitor[1][0]["title"] == "Laundry stack stopped"
+    assert monitor[1][0]["message"] == "No washer/dryer stack motion for 4 min."
     reading(monitor, 860)
     assert len(monitor[1]) == 1
 
