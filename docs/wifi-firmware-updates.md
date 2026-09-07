@@ -46,6 +46,11 @@ detector is idle or done. Discovery takes the next successful normal check-in:
 about ten seconds while waiting for a start, up to two minutes in long-idle mode.
 There is no guarantee of delivery if the bank switches off first.
 
+For deliberate bench maintenance only, `--interrupt-monitoring` overrides the
+motion-state deferral. This is an authenticated per-job choice, off by default;
+it still waits until the initial thirty-second settling period ends. Use it only
+after explicitly deciding it is safe to interrupt the current monitoring session.
+
 `installed` requires a new telemetry report with the expected running-image
 SHA-256, not just a completed download. Wireless diagnostics include the build
 identifier, job ID, result, and installed hash. An unsuccessful attempt reports

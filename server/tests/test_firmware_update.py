@@ -162,6 +162,22 @@ def test_update_is_not_offered_to_old_wrong_device_or_settling_firmware(rig):
         assert "ota" not in _post(client, SECRET, raw).json()
 
 
+def test_only_explicit_maintenance_override_allows_interrupting_a_cycle(rig):
+    client, _, _ = rig
+    package = make_package(
+        b"\xe9" + b"x" * 100,
+        device_id="sensor",
+        secret=SECRET,
+        interrupt_monitoring=True,
+    )
+    stage(client, package)
+    response = _post(client, SECRET, packet(state="cycle_running")).json()
+    assert json.loads(response["ota"]["manifest"])["interrupt_monitoring"] is True
+    settling = packet(state="cycle_running", event="settling")
+    settling["diagnostics"]["startup_settling"] = True
+    assert "ota" not in _post(client, SECRET, settling).json()
+
+
 def test_failed_job_stops_retrying_and_new_job_supersedes_pending(rig):
     client, db, _ = rig
     first = make_package(b"\xe9" + b"x" * 100, device_id="sensor", secret=SECRET)

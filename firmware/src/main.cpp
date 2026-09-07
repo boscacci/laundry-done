@@ -721,6 +721,7 @@ bool post_calibration_sample_event(uint32_t event_counter,
     if (!deserializeJson(response, response_body)) {
       laundry_ota::handle_offer(response["ota"], event_id,
           wireless_update_allowed(millis(), telemetry_cadence_detector.state(), kTelemetryCadence),
+          millis() >= kTelemetryCadence.startup_settle_ms,
           RELAY_URL, DEVICE_ID, DEVICE_SECRET);
     }
   }

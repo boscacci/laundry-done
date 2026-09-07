@@ -204,9 +204,9 @@ void diagnostics(JsonObject destination) {
   if (!installed_sha256.isEmpty()) destination["installed_sha256"] = installed_sha256;
 }
 
-void handle_offer(JsonVariantConst offer, const String &event_id, bool allowed,
+void handle_offer(JsonVariantConst offer, const String &event_id, bool allowed, bool settled,
                   const char *relay_url, const char *device_id, const char *secret) {
-  if (!allowed || !storage_ready || !offer.is<JsonObjectConst>()) return;
+  if (!settled || !storage_ready || !offer.is<JsonObjectConst>()) return;
   const String text = offer["manifest"] | "";
   const String signature = offer["signature"] | "";
   if (text.length() > 1536) return;
@@ -219,6 +219,8 @@ void handle_offer(JsonVariantConst offer, const String &event_id, bool allowed,
   }
   JsonDocument manifest;
   if (deserializeJson(manifest, text)) return;
+  if (!allowed && !(manifest["interrupt_monitoring"].is<bool>() &&
+                    manifest["interrupt_monitoring"].as<bool>())) return;
   const String job = manifest["job_id"] | "";
   uint8_t nonce[12], tag[16], sha[32], job_bytes[16];
   const time_t now = time(nullptr);

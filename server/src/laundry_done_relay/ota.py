@@ -57,6 +57,8 @@ def validate_package(raw):
         raise ValueError("invalid image size")
     if type(raw.get("ttl_seconds")) is not int or not 60 <= raw["ttl_seconds"] <= 3600:
         raise ValueError("invalid expiration")
+    if type(raw.get("interrupt_monitoring", False)) is not bool:
+        raise ValueError("invalid maintenance flag")
     ciphertext = base64.b64decode(raw["ciphertext"], validate=True)
     if len(ciphertext) != raw["size"]:
         raise ValueError("invalid ciphertext size")
@@ -64,6 +66,7 @@ def validate_package(raw):
         key: raw[key]
         for key in ("version", "job_id", "device_id", "size", "sha256", "nonce", "tag")
     }
+    metadata["interrupt_monitoring"] = raw.get("interrupt_monitoring", False)
     return metadata, ciphertext
 
 
@@ -198,9 +201,7 @@ def offer_update(path, secret, raw):
                 "AND status IN ('pending','offered')",
                 (result, job, raw["device_id"]),
             )
-        if extra.get("startup_settling") is not False or extra.get(
-            "detector_state"
-        ) not in ("idle", "done_sent"):
+        if extra.get("startup_settling") is not False:
             return None
         row = conn.execute(
             "SELECT metadata,expires_at FROM firmware_jobs WHERE device_id=? "
@@ -210,6 +211,11 @@ def offer_update(path, secret, raw):
         if not row:
             return None
         metadata = json.loads(row[0])
+        if extra.get("detector_state") not in (
+            "idle",
+            "done_sent",
+        ) and not metadata.get("interrupt_monitoring", False):
+            return None
         metadata.update(event_id=raw["event_id"], expires_at=row[1])
         manifest = json.dumps(metadata, separators=(",", ":"))
         conn.execute(

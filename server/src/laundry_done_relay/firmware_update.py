@@ -15,7 +15,9 @@ import httpx
 from laundry_done_relay.ota import MAX_IMAGE_BYTES, encryption_key, mac, package_aad
 
 
-def make_package(image, *, device_id, secret, ttl_seconds=600):
+def make_package(
+    image, *, device_id, secret, ttl_seconds=600, interrupt_monitoring=False
+):
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
     if not image or image[0] != 0xE9 or len(image) > MAX_IMAGE_BYTES:
@@ -28,6 +30,7 @@ def make_package(image, *, device_id, secret, ttl_seconds=600):
         sha256=hashlib.sha256(image).hexdigest(),
         nonce=secrets.token_bytes(12).hex(),
         ttl_seconds=ttl_seconds,
+        interrupt_monitoring=interrupt_monitoring,
     )
     encrypted = AESGCM(encryption_key(secret)).encrypt(
         bytes.fromhex(package["nonce"]), image, package_aad(package)
@@ -52,6 +55,11 @@ def main():
     parser.add_argument("--firmware", type=Path)
     parser.add_argument("--status", help="Read status of this job instead of staging")
     parser.add_argument("--ttl-seconds", type=int, default=600)
+    parser.add_argument(
+        "--interrupt-monitoring",
+        action="store_true",
+        help="Explicit maintenance: allow a reboot even if motion is detected",
+    )
     args = parser.parse_args()
     try:
         secret = os.environ.get("DEVICE_SECRET", "")
@@ -84,6 +92,7 @@ def main():
                     device_id=args.device_id,
                     secret=secret,
                     ttl_seconds=args.ttl_seconds,
+                    interrupt_monitoring=args.interrupt_monitoring,
                 )
                 body = json.dumps(package, separators=(",", ":")).encode()
                 response = client.post(
