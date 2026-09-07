@@ -84,5 +84,14 @@ key. Keep a known-good source revision and retain USB recovery access.
 Bluetooth updates are not implemented. Wi-Fi uses the device's existing network
 and relay and can work without standing next to the washer.
 
+## Hardware smoke test
+
+Verified on the ESP32 on 2026-09-07, with USB supplying stable power: a deliberately
+corrupted encrypted image was rejected without rebooting, and monitoring resumed.
+A subsequent valid Wi-Fi transfer completed, rebooted the board, and reported the
+expected running-image SHA-256 in signed telemetry; the relay marked it installed.
+The test used the explicit maintenance override after confirming no load was
+running. This verifies the update path, not HyperGear battery-bank reliability.
+
 References: [Espressif Update library](https://github.com/espressif/arduino-esp32/tree/2.0.17/libraries/Update),
 [AES-GCM documentation](https://cryptography.io/en/latest/hazmat/primitives/aead/#cryptography.hazmat.primitives.ciphers.aead.AESGCM).
