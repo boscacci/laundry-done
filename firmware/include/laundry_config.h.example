@@ -8,8 +8,17 @@
 #define WIFI_PASSWORD "your-password"
 
 #define DEVICE_ID "laundry-stack-1"
-#define FIRMWARE_VERSION "0.1.0"
+#define FIRMWARE_VERSION "0.1.1"
 
 // Use your home server's router-reserved static IP, not an SSH alias.
 #define RELAY_URL "http://192.168.1.50:8088/api/v1/events"
 #define DEVICE_SECRET "replace-with-a-long-random-secret"
+
+// Default brownout-resistant Wi-Fi policy. Keep pre-connect scans off for
+// battery-bank or marginal USB power, and use a lower ESP32 TX power enum value
+// while the relay is nearby.
+#define LAUNDRY_WIFI_TX_POWER_QUARTER_DBM 8
+#define LAUNDRY_WIFI_PRECONNECT_SCAN 0
+#define LAUNDRY_WIFI_FAILURE_SCAN 0
+#define LAUNDRY_KEEPALIVE_WIFI_SCAN 0
+#define LAUNDRY_CPU_FREQ_MHZ 80

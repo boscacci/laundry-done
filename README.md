@@ -48,7 +48,7 @@ the washer or dryer. After that, idle/done states use a 2-minute light-sleep nap
 with no keep-alive pulse, which lets the HyperGear bank auto-off instead of
 running forever after laundry is finished. It returns to a 10-second cadence
 during motion and the done-confirmation quiet window, and active cycles run an
-8-second Wi-Fi scan/radio load pulse every 25 seconds to stay below the measured
+8-second low-power Wi-Fi radio load pulse every 25 seconds to stay below the measured
 sub-40-second HyperGear no-load cutoff. It uses NTP timestamps when Wi-Fi is
 available, and keeps the onboard LED off except while transmitting or pulsing
 the power-bank keepalive.

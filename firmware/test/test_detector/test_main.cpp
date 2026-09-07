@@ -332,6 +332,15 @@ void test_default_telemetry_cadence_lets_power_bank_auto_off_when_idle() {
       telemetry_poll_ms(10UL * 60UL * 1000UL, DetectorState::QuietCandidate, config));
 }
 
+void test_default_wifi_power_policy_avoids_high_draw_preconnect_scans() {
+  const WifiPowerPolicy policy = brownout_resistant_wifi_policy();
+
+  TEST_ASSERT_FALSE(policy.preconnect_scan);
+  TEST_ASSERT_FALSE(policy.failure_scan);
+  TEST_ASSERT_EQUAL(8, policy.tx_power_quarter_dbm);
+  TEST_ASSERT_EQUAL(80, policy.cpu_frequency_mhz);
+}
+
 void test_idle_and_done_naps_do_not_pulse_after_startup_keep_awake_window() {
   const TelemetryCadenceConfig config;
 
@@ -535,6 +544,7 @@ int main(int argc, char **argv) {
   RUN_TEST(test_motion_trigger_enforces_cooldown_after_posting);
   RUN_TEST(test_startup_keep_awake_uses_short_idle_poll_during_manual_battery_wake_window);
   RUN_TEST(test_default_telemetry_cadence_lets_power_bank_auto_off_when_idle);
+  RUN_TEST(test_default_wifi_power_policy_avoids_high_draw_preconnect_scans);
   RUN_TEST(test_idle_and_done_naps_do_not_pulse_after_startup_keep_awake_window);
   RUN_TEST(test_running_and_quiet_candidate_naps_still_keep_power_bank_awake);
   RUN_TEST(test_active_cycle_load_pulse_runs_before_forty_second_power_bank_cutoff);

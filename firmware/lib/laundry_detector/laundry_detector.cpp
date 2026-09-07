@@ -222,6 +222,10 @@ DetectorConfig telemetry_cadence_detector_config() {
   return config;
 }
 
+WifiPowerPolicy brownout_resistant_wifi_policy() {
+  return WifiPowerPolicy{};
+}
+
 unsigned long telemetry_poll_ms(unsigned long now_ms,
                                 DetectorState state,
                                 const TelemetryCadenceConfig &config) {

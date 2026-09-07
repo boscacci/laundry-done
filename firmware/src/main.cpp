@@ -22,7 +22,7 @@
 #define WIFI_SSID "configure-me"
 #define WIFI_PASSWORD "configure-me"
 #define DEVICE_ID "laundry-stack-1"
-#define FIRMWARE_VERSION "0.1.0"
+#define FIRMWARE_VERSION "0.1.1"
 #define RELAY_URL "http://192.168.1.50:8088/api/v1/events"
 #define DEVICE_SECRET "configure-me"
 #endif
@@ -47,6 +47,26 @@
 #define LAUNDRY_KEEPALIVE_WIFI_PULSE 1
 #endif
 
+#ifndef LAUNDRY_KEEPALIVE_WIFI_SCAN
+#define LAUNDRY_KEEPALIVE_WIFI_SCAN 0
+#endif
+
+#ifndef LAUNDRY_WIFI_PRECONNECT_SCAN
+#define LAUNDRY_WIFI_PRECONNECT_SCAN 0
+#endif
+
+#ifndef LAUNDRY_WIFI_FAILURE_SCAN
+#define LAUNDRY_WIFI_FAILURE_SCAN 0
+#endif
+
+#ifndef LAUNDRY_WIFI_TX_POWER_QUARTER_DBM
+#define LAUNDRY_WIFI_TX_POWER_QUARTER_DBM 8
+#endif
+
+#ifndef LAUNDRY_CPU_FREQ_MHZ
+#define LAUNDRY_CPU_FREQ_MHZ 80
+#endif
+
 namespace {
 constexpr uint8_t kLedPin = 2;
 constexpr uint8_t kSdaPin = 21;
@@ -55,6 +75,19 @@ constexpr unsigned long kSampleWindowMs = 4000;
 constexpr unsigned long kSampleIntervalMs = 40;
 constexpr TelemetryCadenceConfig kTelemetryCadence{};
 const DetectorConfig kTelemetryDetectorConfig = telemetry_cadence_detector_config();
+constexpr WifiPowerPolicy kWifiPowerPolicy{
+    LAUNDRY_WIFI_PRECONNECT_SCAN != 0,
+    LAUNDRY_WIFI_FAILURE_SCAN != 0,
+    LAUNDRY_WIFI_TX_POWER_QUARTER_DBM,
+    LAUNDRY_CPU_FREQ_MHZ,
+};
+static_assert(LAUNDRY_WIFI_TX_POWER_QUARTER_DBM >= -4 &&
+                  LAUNDRY_WIFI_TX_POWER_QUARTER_DBM <= 78,
+              "LAUNDRY_WIFI_TX_POWER_QUARTER_DBM must be an ESP32 Wi-Fi power enum value");
+static_assert(LAUNDRY_CPU_FREQ_MHZ == 80 ||
+                  LAUNDRY_CPU_FREQ_MHZ == 160 ||
+                  LAUNDRY_CPU_FREQ_MHZ == 240,
+              "LAUNDRY_CPU_FREQ_MHZ must be 80, 160, or 240");
 
 struct WifiTarget {
   bool seen = false;
@@ -367,6 +400,13 @@ void log_target_wifi_scan() {
   scan_wifi_target();
 }
 
+void enable_low_power_wifi_station() {
+  WiFi.persistent(false);
+  WiFi.mode(WIFI_STA);
+  WiFi.setSleep(false);
+  WiFi.setTxPower(static_cast<wifi_power_t>(kWifiPowerPolicy.tx_power_quarter_dbm));
+}
+
 bool battery_keep_awake_active() {
   return millis() < kTelemetryCadence.startup_keep_awake_ms;
 }
@@ -388,9 +428,11 @@ void power_bank_keepalive_pulse(unsigned long duration_ms, unsigned long remaini
   const unsigned long started_ms = millis();
   digitalWrite(kLedPin, HIGH);
 #if LAUNDRY_KEEPALIVE_WIFI_PULSE
-  WiFi.persistent(false);
-  WiFi.mode(WIFI_STA);
-  WiFi.setSleep(false);
+  enable_low_power_wifi_station();
+  Serial.printf("battery_keepalive_radio tx_power_quarter_dbm=%d scan=%s\n",
+                kWifiPowerPolicy.tx_power_quarter_dbm,
+                LAUNDRY_KEEPALIVE_WIFI_SCAN ? "true" : "false");
+#if LAUNDRY_KEEPALIVE_WIFI_SCAN
   if (duration_ms >= 5000UL) {
     const int network_count = WiFi.scanNetworks(false, true);
     Serial.printf("battery_keepalive_scan count=%d elapsed_ms=%lu\n",
@@ -398,6 +440,7 @@ void power_bank_keepalive_pulse(unsigned long duration_ms, unsigned long remaini
                   millis() - started_ms);
     WiFi.scanDelete();
   }
+#endif
 #endif
   const unsigned long elapsed_ms = millis() - started_ms;
   if (elapsed_ms < duration_ms) {
@@ -463,19 +506,28 @@ void nap(unsigned long nap_ms, DetectorState state) {
 }
 
 bool connect_wifi() {
+  Serial.printf("wifi_connect_start tx_power_quarter_dbm=%d preconnect_scan=%s failure_scan=%s\n",
+                kWifiPowerPolicy.tx_power_quarter_dbm,
+                kWifiPowerPolicy.preconnect_scan ? "true" : "false",
+                kWifiPowerPolicy.failure_scan ? "true" : "false");
+  Serial.flush();
   if (WiFi.status() == WL_CONNECTED) {
     Serial.printf("wifi_reuse_connected=true rssi=%d\n", WiFi.RSSI());
     maybe_sync_clock();
     return true;
   }
 
-  WiFi.persistent(false);
-  WiFi.disconnect(true, true);
-  delay(250);
-  WiFi.mode(WIFI_STA);
-  WiFi.setSleep(false);
+  enable_low_power_wifi_station();
+  Serial.printf("wifi_radio_ready=true cpu_mhz=%u\n", getCpuFrequencyMhz());
+  Serial.flush();
   WiFi.setMinSecurity(WIFI_AUTH_WPA_PSK);
-  WifiTarget target = scan_wifi_target();
+  WifiTarget target;
+  if (kWifiPowerPolicy.preconnect_scan) {
+    target = scan_wifi_target();
+  } else {
+    Serial.printf("wifi_preconnect_scan skipped=true tx_power_quarter_dbm=%d\n",
+                  kWifiPowerPolicy.tx_power_quarter_dbm);
+  }
   const auto wait_for_connection = [](unsigned long timeout_ms) {
     const unsigned long started = millis();
     while (WiFi.status() != WL_CONNECTED && millis() - started < timeout_ms) {
@@ -518,7 +570,11 @@ bool connect_wifi() {
   Serial.printf("wifi_connected=false status=%d elapsed_ms=%lu\n",
                 static_cast<int>(WiFi.status()),
                 elapsed_ms);
-  log_target_wifi_scan();
+  if (kWifiPowerPolicy.failure_scan) {
+    log_target_wifi_scan();
+  } else {
+    Serial.println("wifi_failure_scan skipped=true");
+  }
   return false;
 }
 
@@ -669,7 +725,35 @@ bool post_done_sent_event(uint32_t event_counter,
 }
 } // namespace
 
-#if LAUNDRY_I2C_SCAN
+#if LAUNDRY_WIFI_BRINGUP_TEST
+
+void setup() {
+  Serial.begin(115200);
+  delay(1000);
+  setCpuFrequencyMhz(kWifiPowerPolicy.cpu_frequency_mhz);
+  pinMode(kLedPin, OUTPUT);
+  digitalWrite(kLedPin, LOW);
+  WiFi.mode(WIFI_OFF);
+  Serial.printf("wifi_bringup_test_ready=true cpu_mhz=%u tx_power_quarter_dbm=%d preconnect_scan=%s failure_scan=%s\n",
+                getCpuFrequencyMhz(),
+                kWifiPowerPolicy.tx_power_quarter_dbm,
+                kWifiPowerPolicy.preconnect_scan ? "true" : "false",
+                kWifiPowerPolicy.failure_scan ? "true" : "false");
+  Serial.flush();
+}
+
+void loop() {
+  const bool ok = connect_wifi();
+  Serial.printf("wifi_bringup_result ok=%s status=%d rssi=%d\n",
+                ok ? "true" : "false",
+                static_cast<int>(WiFi.status()),
+                WiFi.status() == WL_CONNECTED ? WiFi.RSSI() : -127);
+  Serial.flush();
+  digitalWrite(kLedPin, ok ? HIGH : LOW);
+  delay(10000);
+}
+
+#elif LAUNDRY_I2C_SCAN
 
 void setup() {
   Serial.begin(115200);
@@ -801,6 +885,7 @@ void blink_led(uint8_t count, unsigned int on_ms, unsigned int off_ms) {
 void setup() {
   Serial.begin(115200);
   delay(1000);
+  setCpuFrequencyMhz(kWifiPowerPolicy.cpu_frequency_mhz);
   pinMode(kLedPin, OUTPUT);
   digitalWrite(kLedPin, LOW);
   WiFi.mode(WIFI_OFF);
@@ -1044,7 +1129,7 @@ void setup() {
   boot_id = make_boot_id();
   Serial.printf("sensor_type=%s\n", motion_sensor_to_string(motion_sensor));
   telemetry_run_id = String("production-") + String(DEVICE_ID) + "-" + boot_id;
-  Serial.printf("telemetry_enabled=true run_id=%s sample_window_ms=%lu poll_ms=%lu battery_keep_awake_ms=%lu battery_keep_awake_poll_ms=%lu idle_poll_ms=%lu battery_keepalive_interval_ms=%lu battery_keepalive_pulse_ms=%lu active_load_pulse_interval_ms=%lu active_load_pulse_ms=%lu battery_keepalive_mode=%s classifier=server\n",
+  Serial.printf("telemetry_enabled=true run_id=%s sample_window_ms=%lu poll_ms=%lu battery_keep_awake_ms=%lu battery_keep_awake_poll_ms=%lu idle_poll_ms=%lu battery_keepalive_interval_ms=%lu battery_keepalive_pulse_ms=%lu active_load_pulse_interval_ms=%lu active_load_pulse_ms=%lu battery_keepalive_mode=%s cpu_mhz=%u classifier=server\n",
                 telemetry_run_id.c_str(),
                 kSampleWindowMs,
                 kTelemetryCadence.running_poll_ms,
@@ -1055,7 +1140,8 @@ void setup() {
                 kTelemetryCadence.battery_keepalive_pulse_ms,
                 kTelemetryCadence.active_load_pulse_interval_ms,
                 kTelemetryCadence.active_load_pulse_ms,
-                LAUNDRY_KEEPALIVE_WIFI_PULSE ? "wifi_radio" : "active_delay");
+                LAUNDRY_KEEPALIVE_WIFI_PULSE ? "wifi_radio" : "active_delay",
+                getCpuFrequencyMhz());
   Serial.println("sensor_detected=true");
 }
 

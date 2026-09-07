@@ -56,6 +56,23 @@ struct TelemetryCadenceConfig {
   unsigned long active_load_pulse_ms = 8000UL;
 };
 
+struct WifiPowerPolicy {
+  bool preconnect_scan = false;
+  bool failure_scan = false;
+  int tx_power_quarter_dbm = 8;
+  int cpu_frequency_mhz = 80;
+
+  constexpr WifiPowerPolicy() = default;
+  constexpr WifiPowerPolicy(bool preconnect_scan,
+                            bool failure_scan,
+                            int tx_power_quarter_dbm,
+                            int cpu_frequency_mhz)
+      : preconnect_scan(preconnect_scan),
+        failure_scan(failure_scan),
+        tx_power_quarter_dbm(tx_power_quarter_dbm),
+        cpu_frequency_mhz(cpu_frequency_mhz) {}
+};
+
 struct BatteryKeepaliveNap {
   unsigned long sleep_ms = 0;
   unsigned long awake_pulse_ms = 0;
@@ -129,6 +146,8 @@ private:
 };
 
 DetectorConfig telemetry_cadence_detector_config();
+
+WifiPowerPolicy brownout_resistant_wifi_policy();
 
 unsigned long telemetry_poll_ms(unsigned long now_ms,
                                 DetectorState state,
