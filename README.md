@@ -143,6 +143,19 @@ the power-bank keepalive.
 
 ## Development
 
+Run every automated test in the repo-owned container (the only host dependency
+is Docker):
+
+```bash
+docker compose -f compose.test.yaml run --build --rm tests
+```
+
+The test image pins Python and PlatformIO, installs the native GCC toolchain,
+and runs without network access or access to the runtime `.env` and data. This
+is the recommended command for consistent results across development machines.
+
+To run the suites directly when their dependencies are already installed:
+
 Run the server tests:
 
 ```bash

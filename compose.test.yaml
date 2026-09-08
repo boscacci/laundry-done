@@ -1,0 +1,12 @@
+name: laundry-done-test-runner
+
+services:
+  tests:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+    network_mode: none
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
