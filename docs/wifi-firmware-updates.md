@@ -13,32 +13,60 @@ the washer is not filling. An update cannot wake an unpowered battery bank.
 
 ## Operator commands
 
-Build and test `esp32dev`, using the existing ignored Arduino configuration.
-The packaging command uses the Python conda environment with
-`server/requirements-dev.txt` installed. Run from `server` so `src` can be added
-to `PYTHONPATH`, or set `PYTHONPATH=server/src` from the repository root.
+Build `esp32dev` with the pinned container toolchain and the existing ignored
+Arduino configuration. The configuration is mounted as a BuildKit secret, is
+not copied into a container image, and its digest invalidates the build layer
+when it changes. The resulting binary still contains the Wi-Fi credentials and
+device key, so keep the ignored `outputs/firmware` directory private.
+
+```bash
+scripts/build-firmware.sh
+```
+
+On Windows PowerShell:
 
 ```powershell
-pio run -e esp32dev
+scripts/build-firmware.ps1
+```
+
+The OTA packager accepts any compatible ESP32 application image; it does not
+require that the binary was produced by the wrapper. Stage the default output
+with the minimal containerized uploader:
+
+```bash
+scripts/ota.sh \
+  --relay http://192.168.1.207:8088 \
+  --firmware /firmware/firmware.bin
+```
+
+On Windows PowerShell, use `scripts/ota.ps1` with the same arguments.
+The uploader reads the existing device secret without printing it, encrypts the
+firmware in memory, and sends only ciphertext to the relay. Never pass the
+secret as a CLI argument.
+
+The command prints a public job ID. Check it with:
+
+```bash
+scripts/ota.sh --relay http://192.168.1.207:8088 --status JOB_ID
+```
+
+The direct-host equivalents remain available when Python, PlatformIO, and
+`server/requirements-dev.txt` are already installed. Run from the repository
+root with `PYTHONPATH=server/src`, or use the PowerShell commands below:
+
+```powershell
 $env:PYTHONPATH = 'server/src'
 conda run -n sr python -m laundry_done_relay.firmware_update `
   --relay http://192.168.1.207:8088 `
   --config firmware/include/laundry_config.h `
   --firmware .pio/build/esp32dev/firmware.bin
-```
-
-`--config` reads the existing secret without printing it; alternatively supply
-`DEVICE_SECRET` in the process environment. Never pass the secret as a CLI argument.
-Do not publish the `.bin`: it contains the Wi-Fi credentials and device key.
-The packager encrypts in memory and sends only ciphertext to the relay.
-
-The command prints a public job ID. Check it with:
-
-```powershell
 conda run -n sr python -m laundry_done_relay.firmware_update `
   --relay http://192.168.1.207:8088 `
   --config firmware/include/laundry_config.h --status JOB_ID
 ```
+
+Alternatively, the direct-host packager accepts `DEVICE_SECRET` in the process
+environment when `--config` is omitted.
 
 Jobs expire after ten minutes by default (`--ttl-seconds`, 60–3600). They are
 offered only after the initial thirty-second settling period and while the local

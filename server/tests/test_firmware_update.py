@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 
 from laundry_done_relay.app import create_app
 from laundry_done_relay.firmware_update import make_package
-from laundry_done_relay.ota import encryption_key, package_aad
+from laundry_done_relay.ota_crypto import encryption_key, package_aad
 from test_app import _post
 
 SECRET = "isolated-test-secret"

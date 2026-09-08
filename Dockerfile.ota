@@ -1,0 +1,16 @@
+ARG PYTHON_IMAGE=python:3.13.7-slim-bookworm@sha256:adafcc17694d715c905b4c7bebd96907a1fd5cf183395f0ebc4d3428bd22d92d
+FROM ${PYTHON_IMAGE}
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app/server/src
+
+COPY server/requirements-ota.txt /tmp/requirements.txt
+RUN python -m pip install --no-cache-dir --requirement /tmp/requirements.txt \
+    && useradd --create-home --uid 10001 otauser
+
+WORKDIR /app
+COPY --chown=otauser:otauser server/src ./server/src
+
+USER otauser
+ENTRYPOINT ["python", "-m", "laundry_done_relay.firmware_update"]
