@@ -34,6 +34,25 @@ def test_entire_measured_dryer_capture_is_motion_not_an_appliance_guess(tmp_path
     assert set(_classify_with_dashboard_js(tmp_path, samples)) == {"active"}
 
 
+def test_mounted_off_capture_settles_without_arming_or_notifying(monitor, tmp_path):  # noqa: F811
+    samples = measured_windows("mounted_off")
+    assert len(samples) == 22
+    phases = [_classify_server_event(sample)["short"] for sample in samples]
+    assert phases.count("active") == 1
+    assert phases[-1] == "quiet"
+    assert _classify_with_dashboard_js(tmp_path, samples)[-1] == "quiet"
+    for seconds, sample in enumerate(samples):
+        payload = _calibration_payload(
+            event_id=f"mounted-off-{seconds}",
+            cycle_id="mounted-off-session",
+            at=START + timedelta(seconds=seconds * 10),
+            rms=sample["motion_rms_mg"],
+            peak=sample["peak_mg"],
+        )
+        assert _post(monitor[0], "test-secret", payload).status_code == 202
+    assert monitor[1] == []
+
+
 @pytest.mark.parametrize(
     "rms,peak", [(36.72009, 86.93901), (42.6087, 106.9219), (48.51279, 112.7674)]
 )

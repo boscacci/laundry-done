@@ -40,6 +40,16 @@ void test_entire_measured_dryer_capture_stays_running() {
   }
 }
 
+void test_mounted_off_capture_never_confirms_motion() {
+  LaundryDetector detector(telemetry_cadence_detector_config());
+  for (const auto &window : measured_windows("tests/fixtures/mounted_off.csv", 22)) {
+    const Decision result = detector.observe(window);
+    TEST_ASSERT_NOT_EQUAL(DetectorState::CycleRunning, result.state);
+    TEST_ASSERT_FALSE(result.should_post);
+  }
+  TEST_ASSERT_EQUAL(DetectorState::Idle, detector.state());
+}
+
 void test_measured_desk_noise_never_arms_a_cycle() {
   LaundryDetector detector(telemetry_cadence_detector_config());
   for (const auto &window : desk_noise()) {
@@ -703,6 +713,7 @@ void test_wireless_updates_require_settled_idle_state() {
 
 int main() {
   UNITY_BEGIN();
+  RUN_TEST(test_mounted_off_capture_never_confirms_motion);
   RUN_TEST(test_cadence_keeps_power_for_restarted_server_quiet_countdown);
   RUN_TEST(test_entire_measured_dryer_capture_stays_running);
   RUN_TEST(test_invalid_sensor_windows_do_not_count_as_quiet);
