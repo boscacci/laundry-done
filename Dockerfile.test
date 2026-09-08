@@ -24,6 +24,7 @@ COPY --chown=tester:tester firmware ./firmware
 COPY --chown=tester:tester server/pytest.ini ./server/pytest.ini
 COPY --chown=tester:tester server/src ./server/src
 COPY --chown=tester:tester server/tests ./server/tests
+COPY --chown=tester:tester tests ./tests
 
 USER tester
 
