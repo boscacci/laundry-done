@@ -12,12 +12,10 @@ fi
 
 config_digest="$(sha256sum "${config_path}" | awk '{print $1}')"
 mkdir -p "${output_path}"
-docker_config="$(mktemp -d "${TMPDIR:-/tmp}/laundry-docker.XXXXXX")"
 staging_path="$(mktemp -d "${output_path}/.firmware-build.XXXXXX")"
-trap 'rm -rf "${docker_config}" "${staging_path}"' EXIT
-printf '{}\n' >"${docker_config}/config.json"
+trap 'rm -rf "${staging_path}"' EXIT
 
-DOCKER_CONFIG="${docker_config}" docker build \
+docker build \
   --file "${repo_root}/Dockerfile.firmware" \
   --secret "id=laundry_config,src=${config_path}" \
   --build-arg "CONFIG_DIGEST=${config_digest}" \
