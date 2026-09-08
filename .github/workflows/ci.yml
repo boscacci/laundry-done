@@ -27,3 +27,12 @@ jobs:
             --output type=local,dest=/tmp/laundry-firmware \
             .
           test -s /tmp/laundry-firmware/firmware.bin
+      - name: Package the compiled image with the OTA uploader
+        run: |
+          docker build --file Dockerfile.ota --tag laundry-done-ota-ci .
+          docker run --rm --network none --read-only \
+            --user "$(id -u):$(id -g)" \
+            --security-opt no-new-privileges:true --cap-drop ALL \
+            --volume /tmp/laundry-firmware:/artifacts:ro \
+            --entrypoint python laundry-done-ota-ci -c \
+            'from pathlib import Path; from laundry_done_relay.firmware_update import make_package; image = Path("/artifacts/firmware.bin").read_bytes(); package = make_package(image, device_id="ci-device", secret="ci-secret"); assert package["size"] == len(image)'

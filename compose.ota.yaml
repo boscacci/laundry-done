@@ -16,7 +16,7 @@ services:
     secrets:
       - laundry_config
     volumes:
-      - ./outputs/firmware:/firmware:ro
+      - ./outputs:/artifacts:ro
 
 secrets:
   laundry_config:

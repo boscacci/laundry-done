@@ -17,7 +17,7 @@ Build `esp32dev` with the pinned container toolchain and the existing ignored
 Arduino configuration. The configuration is mounted as a BuildKit secret, is
 not copied into a container image, and its digest invalidates the build layer
 when it changes. The resulting binary still contains the Wi-Fi credentials and
-device key, so keep the ignored `outputs/firmware` directory private.
+device key, so keep the ignored `outputs/firmware.bin` file private.
 
 ```bash
 scripts/build-firmware.sh
@@ -36,7 +36,7 @@ with the minimal containerized uploader:
 ```bash
 scripts/ota.sh \
   --relay http://192.168.1.207:8088 \
-  --firmware /firmware/firmware.bin
+  --firmware /artifacts/firmware.bin
 ```
 
 On Windows PowerShell, use `scripts/ota.ps1` with the same arguments.

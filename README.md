@@ -175,7 +175,7 @@ scripts/build-firmware.sh
 ```
 
 On Windows PowerShell, run `scripts/build-firmware.ps1`. Both commands write the
-OTA-ready image to `outputs/firmware/firmware.bin`; that ignored binary contains
+OTA-ready image to `outputs/firmware.bin`; that ignored binary contains
 the Wi-Fi credentials and device key, so do not publish or commit it. See
 [Wi-Fi firmware updates](docs/wifi-firmware-updates.md) for staging any compatible
 ESP32 application image and checking its installation status.
