@@ -10,16 +10,11 @@ if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) {
 
 $configDigest = (Get-FileHash -LiteralPath $configPath -Algorithm SHA256).Hash.ToLowerInvariant()
 New-Item -ItemType Directory -Force -Path $outputPath | Out-Null
-$dockerConfig = Join-Path ([IO.Path]::GetTempPath()) ("laundry-docker-" + [guid]::NewGuid())
 $stagingPath = Join-Path $outputPath ('.firmware-build-' + [guid]::NewGuid())
-$previousDockerConfig = $env:DOCKER_CONFIG
 $dockerExitCode = 1
-New-Item -ItemType Directory -Path $dockerConfig | Out-Null
 New-Item -ItemType Directory -Path $stagingPath | Out-Null
-Set-Content -LiteralPath (Join-Path $dockerConfig 'config.json') -Value '{}' -NoNewline
 
 try {
-    $env:DOCKER_CONFIG = $dockerConfig
     & docker build `
         --file (Join-Path $repoRoot 'Dockerfile.firmware') `
         --secret "id=laundry_config,src=$configPath" `
@@ -35,8 +30,6 @@ try {
     }
 }
 finally {
-    $env:DOCKER_CONFIG = $previousDockerConfig
-    Remove-Item -LiteralPath $dockerConfig -Recurse -Force
     Remove-Item -LiteralPath $stagingPath -Recurse -Force
 }
 if ($dockerExitCode -ne 0) {

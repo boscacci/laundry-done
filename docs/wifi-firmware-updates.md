@@ -29,6 +29,10 @@ On Windows PowerShell:
 scripts/build-firmware.ps1
 ```
 
+Run Docker Desktop commands from the signed-in Windows desktop session. Windows
+Credential Manager is intentionally unavailable to a non-interactive SSH login,
+so registry pulls started through such a session can fail before the build runs.
+
 The OTA packager accepts any compatible ESP32 application image; it does not
 require that the binary was produced by the wrapper. Stage the default output
 with the minimal containerized uploader:
