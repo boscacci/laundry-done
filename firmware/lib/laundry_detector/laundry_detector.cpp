@@ -1,4 +1,5 @@
 #include "laundry_detector.h"
+#include <cmath>
 
 MovementTrigger::MovementTrigger(const MovementTriggerConfig &config) : config_(config) {}
 
@@ -38,6 +39,18 @@ LaundryDetector::LaundryDetector(const DetectorConfig &config) : config_(config)
 
 Decision LaundryDetector::observe(const MotionWindow &window) {
   Decision decision;
+  if (window.seconds == 0 || !std::isfinite(window.rms_mg) ||
+      !std::isfinite(window.peak_mg) || window.rms_mg < 0 || window.peak_mg < window.rms_mg) {
+    // Failed reads are missing evidence. Never advance a quiet countdown.
+    recent_window_count_ = 0;
+    recent_window_index_ = 0;
+    if (state_ == DetectorState::MotionConfirming) reset();
+    if (state_ == DetectorState::QuietCandidate) state_ = DetectorState::CycleRunning;
+    quiet_resume_started_ms_ = 0;
+    decision.state = state_;
+    decision.label = current_label_;
+    return decision;
+  }
   const MotionWindow classified_window = smoothed_window(window);
 
   switch (state_) {
@@ -70,6 +83,11 @@ Decision LaundryDetector::observe(const MotionWindow &window) {
     break;
 
   case DetectorState::QuietCandidate:
+    if (config_.require_continuous_quiet &&
+        (is_active(classified_window) || !is_quiet(classified_window))) {
+      // The relay restarts its quiet timer too. Preserve its power budget.
+      quiet_started_ms_ = 0;
+    }
     if (is_active(classified_window)) {
       if (quiet_resume_started_ms_ == 0) {
         quiet_resume_started_ms_ = classified_window.at_ms;
@@ -82,6 +100,7 @@ Decision LaundryDetector::observe(const MotionWindow &window) {
       }
     } else if (is_quiet(classified_window)) {
       quiet_resume_started_ms_ = 0;
+      if (quiet_started_ms_ == 0) quiet_started_ms_ = classified_window.at_ms;
       const unsigned long quiet_ms = elapsed(classified_window.at_ms, quiet_started_ms_);
       const unsigned long runtime_ms = elapsed(classified_window.at_ms, cycle_started_ms_);
       if (quiet_ms >= config_.done_quiet_ms &&
@@ -89,8 +108,10 @@ Decision LaundryDetector::observe(const MotionWindow &window) {
         state_ = DetectorState::DoneSent;
         last_done_label_ = current_label_;
         last_done_ms_ = classified_window.at_ms;
-        decision.should_post = true;
+        decision.should_post = config_.notify_on_done;
       }
+    } else {
+      quiet_resume_started_ms_ = 0;
     }
     break;
 
@@ -215,10 +236,21 @@ void LaundryDetector::note_motion(const MotionWindow &window) {
 
 DetectorConfig telemetry_cadence_detector_config() {
   DetectorConfig config;
-  config.active_threshold_mg = 2.0f;
-  config.active_peak_threshold_mg = 4.5f;
+  // 2026-09-07 stationary baseline: RMS <= 3.151 mg, peak <= 15.869 mg.
+  // Preserve a gap between noise and sustained motion; do not identify the
+  // appliance from amplitude. These thresholds must match the relay.
+  config.active_threshold_mg = 4.0f;
+  config.active_peak_threshold_mg = 20.0f;
+  config.quiet_threshold_mg = 3.5f;
   config.classification_smoothing_samples = 1;
   config.confirm_motion_ms = 30UL * 1000UL;
+  // Cadence only: keep telemetry alive beyond the relay's four-minute quiet
+  // window, then release the bank even if a brief false start never armed it.
+  config.done_quiet_ms = 5UL * 60UL * 1000UL;
+  config.minimum_washer_runtime_ms = 0;
+  config.minimum_dryer_runtime_ms = 0;
+  config.notify_on_done = false;
+  config.require_continuous_quiet = true;
   return config;
 }
 

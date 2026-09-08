@@ -28,6 +28,10 @@ New diagnostic fields include:
 
 Counters describe completed work before the current packet and restart at boot.
 The diagnostics reflect firmware actions, not measured battery voltage/current.
+The measured-noise correction adds `sample_valid` and an actual per-window
+`sample_count`; older builds reported a nominal count. Invalid windows cannot
+advance the detector's quiet countdown. See [motion classification](motion-classification.md)
+for the measured fixtures and deployment gate.
 Loss of power prevents a final report. The next successful boot can report its
 reset cause; a power-on indication alone does not identify the cable, battery
 bank, or reset pin as the cause. There is no voltage/current sensor in this build.

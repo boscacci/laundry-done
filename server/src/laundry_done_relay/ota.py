@@ -11,23 +11,10 @@ import time
 from fastapi import HTTPException, Request
 from fastapi.responses import Response
 
-MAX_IMAGE_BYTES = 0x140000
+from laundry_done_relay.ota_crypto import MAX_IMAGE_BYTES, mac
+
+
 MAX_PACKAGE_BYTES = 2 * MAX_IMAGE_BYTES
-
-
-def mac(secret, message):
-    return hmac.new(secret.encode(), message, hashlib.sha256).hexdigest()
-
-
-def encryption_key(secret):
-    return bytes.fromhex(mac(secret, b"laundry-ota-aes-gcm-v1"))
-
-
-def package_aad(package):
-    return (
-        f"laundry-ota-v1\n{package['job_id']}\n{package['device_id']}\n"
-        f"{package['size']}\n{package['sha256']}"
-    ).encode()
 
 
 def init_ota(path):

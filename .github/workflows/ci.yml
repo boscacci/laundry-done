@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - name: Run server and native firmware tests
+        run: docker compose -f compose.test.yaml run --build --rm tests
+      - name: Compile an OTA-capable ESP32 image
+        run: |
+          mkdir -p /tmp/laundry-firmware
+          docker build \
+            --file Dockerfile.firmware \
+            --secret id=laundry_config,src=firmware/include/laundry_config.h.example \
+            --build-arg CONFIG_DIGEST=ci-example-config \
+            --output type=local,dest=/tmp/laundry-firmware \
+            .
+          test -s /tmp/laundry-firmware/firmware.bin
+      - name: Package the compiled image with the OTA uploader
+        run: |
+          docker build --file Dockerfile.ota --tag laundry-done-ota-ci .
+          docker run --rm --network none --read-only \
+            --user "$(id -u):$(id -g)" \
+            --security-opt no-new-privileges:true --cap-drop ALL \
+            --volume /tmp/laundry-firmware:/artifacts:ro \
+            --entrypoint python laundry-done-ota-ci -c \
+            'from pathlib import Path; from laundry_done_relay.firmware_update import make_package; image = Path("/artifacts/firmware.bin").read_bytes(); package = make_package(image, device_id="ci-device", secret="ci-secret"); assert package["size"] == len(image)'

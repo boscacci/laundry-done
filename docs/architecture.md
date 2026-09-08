@@ -56,7 +56,7 @@ sequenceDiagram
   Relay->>Db: Store raw sample
   Relay->>Relay: Smooth and classify readings
   Relay->>Db: Store server-generated done_sent marker when quiet confirms
-  Sensor->>Relay: Signed done_sent when firmware confirms done
+  Sensor->>Relay: Continue quiet telemetry for five minutes before releasing power
   Relay->>Gotify: POST phone alert for first done marker
   Browser->>Relay: GET /api/v1/calibration/events
   Relay->>Db: Read recent samples
@@ -69,7 +69,7 @@ sequenceDiagram
 | --- | --- |
 | Vibration strength | RMS motion in `mg`, or the typical shake during the sample window. |
 | Biggest jolt | Peak motion in `mg`, or the largest instant change in that window. |
-| Phase background | Server-side best guess for that time span: quiet, washer, dryer, or strong spin. |
+| Phase background | Server motion evidence: quiet, active, uncertain, handling/extreme, or invalid. Amplitude does not establish appliance identity. |
 | Sensor sample | Time reported by the ESP32 when it took the measurement. |
 | Relay received | Time the home server received the measurement. |
 | Wi-Fi signal | ESP32 Wi-Fi RSSI in dBm; less negative is stronger. |

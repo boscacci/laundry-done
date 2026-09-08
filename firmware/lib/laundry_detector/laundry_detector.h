@@ -18,6 +18,8 @@ enum class CycleLabel {
 };
 
 struct DetectorConfig {
+  bool notify_on_done = true;
+  bool require_continuous_quiet = false;
   float active_threshold_mg = 3.0f;
   float active_peak_threshold_mg = 8.0f;
   float quiet_threshold_mg = 1.5f;

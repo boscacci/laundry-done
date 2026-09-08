@@ -260,17 +260,13 @@ bool read_motion_event(sensors_event_t *event) {
   sensors_event_t temp_event;
   switch (motion_sensor) {
   case MotionSensor::Lis3dh:
-    lis.getEvent(event);
-    return true;
+    return lis.getEvent(event);
   case MotionSensor::Lsm6ds3:
-    lsm6ds3.getEvent(event, &gyro_event, &temp_event);
-    return true;
+    return lsm6ds3.getEvent(event, &gyro_event, &temp_event);
   case MotionSensor::Lsm6ds3trc:
-    lsm6ds3trc.getEvent(event, &gyro_event, &temp_event);
-    return true;
+    return lsm6ds3trc.getEvent(event, &gyro_event, &temp_event);
   case MotionSensor::Lsm6dsox:
-    lsm6dsox.getEvent(event, &gyro_event, &temp_event);
-    return true;
+    return lsm6dsox.getEvent(event, &gyro_event, &temp_event);
   case MotionSensor::None:
   default:
     return false;
@@ -300,7 +296,10 @@ String hmac_sha256(const String &body) {
   return String(hex);
 }
 
+uint16_t last_motion_sample_count = 0;
+
 MotionWindow sample_motion_window() {
+  last_motion_sample_count = 0;
   sensors_event_t previous;
   if (!read_motion_event(&previous)) {
     return MotionWindow{millis(), 0, 0.0f, 0.0f};
@@ -314,7 +313,7 @@ MotionWindow sample_motion_window() {
   while (millis() - start < kSampleWindowMs) {
     sensors_event_t current;
     if (!read_motion_event(&current)) {
-      break;
+      return MotionWindow{millis(), 0, 0.0f, 0.0f};
     }
     const float dx = current.acceleration.x - previous.acceleration.x;
     const float dy = current.acceleration.y - previous.acceleration.y;
@@ -328,6 +327,7 @@ MotionWindow sample_motion_window() {
     }
     previous = current;
     count++;
+    last_motion_sample_count = count;
     delay(kSampleIntervalMs);
   }
 
@@ -662,7 +662,8 @@ bool post_calibration_sample_event(uint32_t event_counter,
   doc["firmware_version"] = FIRMWARE_VERSION;
   doc["peak_mg"] = window.peak_mg;
   doc["sample_window_ms"] = kSampleWindowMs;
-  doc["sample_count"] = kSampleWindowMs / kSampleIntervalMs;
+  doc["sample_count"] = last_motion_sample_count;
+  doc["sample_valid"] = window.seconds > 0;
   doc["sensor_type"] = motion_sensor_to_string(motion_sensor);
   doc["uptime_ms"] = window.at_ms;
   doc["wifi_rssi"] = WiFi.status() == WL_CONNECTED ? WiFi.RSSI() : -127;

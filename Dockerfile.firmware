@@ -1,0 +1,30 @@
+# syntax=docker/dockerfile:1.7
+ARG PYTHON_IMAGE=python:3.13.7-slim-bookworm@sha256:adafcc17694d715c905b4c7bebd96907a1fd5cf183395f0ebc4d3428bd22d92d
+FROM ${PYTHON_IMAGE} AS toolchain
+
+ENV PLATFORMIO_CORE_DIR=/opt/platformio \
+    PLATFORMIO_SETTING_ENABLE_TELEMETRY=no
+
+RUN python -m pip install --no-cache-dir platformio==6.2.0 \
+    && useradd --create-home --uid 10001 builder \
+    && install --directory --owner=builder --group=builder /opt/platformio /workspace /artifact
+
+WORKDIR /workspace
+COPY --chown=builder:builder platformio.ini ./
+COPY --chown=builder:builder firmware ./firmware
+
+USER builder
+RUN platformio pkg install --environment esp32dev
+
+FROM toolchain AS firmware-build
+
+# BuildKit does not include secret contents in its cache key. The wrapper scripts
+# pass their SHA-256 separately so a changed local config always rebuilds the image.
+ARG CONFIG_DIGEST
+RUN --mount=type=secret,id=laundry_config,target=/workspace/firmware/include/laundry_config.h,uid=10001,gid=10001,mode=0400 \
+    test -n "${CONFIG_DIGEST}" \
+    && platformio run --environment esp32dev \
+    && install --mode=0600 .pio/build/esp32dev/firmware.bin /artifact/firmware.bin
+
+FROM scratch AS export
+COPY --from=firmware-build /artifact/ /

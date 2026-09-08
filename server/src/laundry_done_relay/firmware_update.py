@@ -12,7 +12,12 @@ import uuid
 
 import httpx
 
-from laundry_done_relay.ota import MAX_IMAGE_BYTES, encryption_key, mac, package_aad
+from laundry_done_relay.ota_crypto import (
+    MAX_IMAGE_BYTES,
+    encryption_key,
+    mac,
+    package_aad,
+)
 
 
 def make_package(

@@ -1,0 +1,23 @@
+name: laundry-done-ota
+
+services:
+  ota:
+    build:
+      context: .
+      dockerfile: Dockerfile.ota
+    read_only: true
+    user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
+    tmpfs:
+      - /tmp:size=16m,mode=0700,uid=${LOCAL_UID:-1000},gid=${LOCAL_GID:-1000}
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    secrets:
+      - laundry_config
+    volumes:
+      - ./outputs:/artifacts:ro
+
+secrets:
+  laundry_config:
+    file: ./firmware/include/laundry_config.h

@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import ipaddress
 import json
+import math
 import os
 import sqlite3
 from datetime import datetime, timezone
@@ -42,6 +43,10 @@ NOTIFICATION_STATES = ("done_sent", "button_pressed", "motion_started")
 SERVER_CLASSIFIER_SMOOTHING_SAMPLES = 8
 SERVER_DONE_QUIET_SECONDS = 4 * 60
 SERVER_MINIMUM_RUNTIME_SECONDS = 8 * 60
+# Measured stationary desk envelope, with margin. Keep production firmware in sync.
+MOTION_ACTIVE_RMS_MG = 4.0
+MOTION_ACTIVE_PEAK_MG = 20.0
+MOTION_QUIET_RMS_MG = 3.5
 # Allow the firmware's two-minute idle cadence plus network jitter. A longer
 # gap is missing evidence, never evidence that the appliance stayed quiet.
 SERVER_MAX_SAMPLE_GAP_SECONDS = 3 * 60
@@ -90,7 +95,9 @@ def create_app(
         try:
             event = LaundryEvent.model_validate_json(body)
         except ValidationError as exc:
-            raise HTTPException(status_code=422, detail="invalid event payload") from exc
+            raise HTTPException(
+                status_code=422, detail="invalid event payload"
+            ) from exc
         already_notified = _done_sent_for_cycle_exists(db_path, event)
         duplicate = _store_event(db_path, event, body)
         if (
@@ -111,7 +118,9 @@ def create_app(
     @app.get("/api/v1/calibration/events")
     def list_calibration_events(
         request: Request,
-        limit: int = Query(default=MAX_CALIBRATION_EVENTS, ge=1, le=MAX_CALIBRATION_EVENTS),
+        limit: int = Query(
+            default=MAX_CALIBRATION_EVENTS, ge=1, le=MAX_CALIBRATION_EVENTS
+        ),
         days: int = Query(default=EVENT_RETENTION_DAYS, ge=1, le=EVENT_RETENTION_DAYS),
         max_peak_mg: float | None = Query(default=None, gt=0),
         x_laundry_admin_secret: str = Header(default=""),
@@ -175,7 +184,9 @@ def _has_admin_access(
     allowed_ips = monitor_tailscale_ips or set()
     if forwarded_for:
         return _client_ip_allowed(forwarded_for, allowed_ips)
-    return client.host in {"127.0.0.1", "::1", "localhost"} or _client_ip_allowed(client.host, allowed_ips)
+    return client.host in {"127.0.0.1", "::1", "localhost"} or _client_ip_allowed(
+        client.host, allowed_ips
+    )
 
 
 def _forwarded_client_ip(request: Request) -> str:
@@ -315,7 +326,9 @@ def _list_calibration_events(
     return _annotate_server_phases(events)
 
 
-def _maybe_send_server_done(path: Path, event: LaundryEvent, sender: PushMessage) -> None:
+def _maybe_send_server_done(
+    path: Path, event: LaundryEvent, sender: PushMessage
+) -> None:
     samples = _current_observation_segment(
         _calibration_events_for_device(path, event.device_id)
     )
@@ -334,14 +347,19 @@ def _maybe_send_server_done(path: Path, event: LaundryEvent, sender: PushMessage
     latest_quiet_at = _event_timestamp(latest_sample)
     if latest_quiet_at is None:
         return
-    last_notification_received_at = _latest_notification_received_at(path, event.device_id)
+    last_notification_received_at = _latest_notification_received_at(
+        path, event.device_id
+    )
     active_indexes = []
     for index, phase_info in enumerate(phases):
-        if phase_info["short"] not in {"washer", "dryer", "strong", "gentle"}:
+        if phase_info["short"] != "active":
             continue
         if last_notification_received_at is not None:
             sample_received_at = _received_timestamp(samples[index])
-            if sample_received_at is None or sample_received_at <= last_notification_received_at:
+            if (
+                sample_received_at is None
+                or sample_received_at <= last_notification_received_at
+            ):
                 continue
         active_indexes.append(index)
     if not active_indexes:
@@ -374,7 +392,7 @@ def _maybe_send_server_done(path: Path, event: LaundryEvent, sender: PushMessage
     if _has_notification_after(path, event.device_id, last_active_at):
         return
 
-    label = _server_done_label(phases[active_indexes[0] :])
+    label = "stack"  # Amplitude cannot reliably distinguish the two appliances.
     notification = LaundryEvent(
         device_id=event.device_id,
         event_id=f"server-done-{event.device_id}-{latest_sample['event_id']}",
@@ -407,12 +425,15 @@ def _current_observation_segment(samples: list[dict]) -> list[dict]:
         sample_gap = (
             previous_at is None
             or current_at is None
-            or not 0 < (current_at - previous_at).total_seconds() <= SERVER_MAX_SAMPLE_GAP_SECONDS
+            or not 0
+            < (current_at - previous_at).total_seconds()
+            <= SERVER_MAX_SAMPLE_GAP_SECONDS
         )
         receipt_gap = (
             previous_received is not None
             and current_received is not None
-            and (current_received - previous_received).total_seconds() > SERVER_MAX_SAMPLE_GAP_SECONDS
+            and (current_received - previous_received).total_seconds()
+            > SERVER_MAX_SAMPLE_GAP_SECONDS
         )
         if changed_session or uptime_reset or sample_gap or receipt_gap:
             start = index
@@ -438,7 +459,12 @@ def _calibration_events_for_device(path: Path, device_id: str) -> list[dict]:
         raw = json.loads(row["raw_json"])
         raw["received_at"] = row["received_at"]
         events.append(raw)
-    return sorted(events, key=lambda item: _event_timestamp(item) or datetime.min.replace(tzinfo=timezone.utc))
+    return sorted(
+        events,
+        key=lambda item: (
+            _event_timestamp(item) or datetime.min.replace(tzinfo=timezone.utc)
+        ),
+    )
 
 
 def _has_notification_after(path: Path, device_id: str, threshold: datetime) -> bool:
@@ -483,23 +509,6 @@ def _latest_notification_received_at(path: Path, device_id: str) -> datetime | N
     return _received_timestamp({"received_at": row["received_at"]})
 
 
-def _server_done_label(phases: list[dict]) -> str:
-    active_shorts = [
-        phase["short"]
-        for phase in phases
-        if phase["short"] in {"washer", "dryer", "strong", "gentle"}
-    ]
-    dryer_count = active_shorts.count("dryer")
-    washer_like_count = active_shorts.count("washer") + active_shorts.count("strong")
-    if dryer_count > 0 and dryer_count >= washer_like_count:
-        return "dryer"
-    if washer_like_count > 0:
-        return "washer"
-    if dryer_count > 0:
-        return "dryer"
-    return "stack"
-
-
 def _annotate_server_phases(events: list[dict]) -> list[dict]:
     if not events:
         return events
@@ -517,43 +526,7 @@ def _annotate_server_phases(events: list[dict]) -> list[dict]:
 
 
 def _server_phases(events: list[dict]) -> list[dict]:
-    recent_washer_value = None
-    recent_washer_age = 10**9
-    phases = []
-    for base in _server_base_phases(events):
-        if base["short"] == "handling":
-            phases.append(base)
-            continue
-        if base["short"] in {"washer", "strong"}:
-            recent_washer_value = (
-                _phase(
-                    "washer",
-                    "Washer running",
-                    "Strong washer-like agitation or spin value pattern.",
-                    "rgba(218, 157, 44, 0.18)",
-                )
-                if base["short"] == "strong"
-                else base
-            )
-            recent_washer_age = 0
-            phases.append(base)
-            continue
-        if base["short"] == "dryer":
-            recent_washer_value = None
-            recent_washer_age = 10**9
-            phases.append(base)
-            continue
-        if recent_washer_value and recent_washer_age < 6 and base["short"] in {
-            "quiet",
-            "gentle",
-            "settling",
-        }:
-            recent_washer_age += 1
-            phases.append(recent_washer_value)
-            continue
-        recent_washer_age += 1
-        phases.append(base)
-    return phases
+    return _server_base_phases(events)
 
 
 def _server_base_phases(events: list[dict]) -> list[dict]:
@@ -565,69 +538,75 @@ def _server_base_phases(events: list[dict]) -> list[dict]:
 
 def _smoothed_events(events: list[dict], window_size: int) -> list[dict]:
     smoothed = []
+    valid_start = 0
     for index, event in enumerate(events):
-        start = max(0, index - window_size + 1)
+        if not _motion_values_valid(event):
+            smoothed.append(dict(event))
+            valid_start = index + 1
+            continue
+        start = max(valid_start, index - window_size + 1)
         chunk = events[start : index + 1]
         copy = dict(event)
-        copy["motion_rms_mg"] = sum(_numeric(item.get("motion_rms_mg")) for item in chunk) / len(
+        copy["motion_rms_mg"] = sum(
+            _numeric(item.get("motion_rms_mg")) for item in chunk
+        ) / len(chunk)
+        copy["peak_mg"] = sum(_numeric(item.get("peak_mg")) for item in chunk) / len(
             chunk
         )
-        copy["peak_mg"] = sum(_numeric(item.get("peak_mg")) for item in chunk) / len(chunk)
         smoothed.append(copy)
     return smoothed
 
 
+def _motion_values_valid(event: dict) -> bool:
+    values = (event.get("motion_rms_mg"), event.get("peak_mg"))
+    return (
+        event.get("sample_valid", True) is True
+        and all(
+            isinstance(v, (int, float))
+            and not isinstance(v, bool)
+            and math.isfinite(v)
+            and v >= 0
+            for v in values
+        )
+        and values[1] >= values[0]
+    )
+
+
 def _classify_server_event(event: dict) -> dict:
-    rms = _numeric(event.get("motion_rms_mg"))
-    peak = _numeric(event.get("peak_mg"))
+    if not _motion_values_valid(event):
+        return _phase(
+            "invalid",
+            "Sensor data unavailable",
+            "Missing or invalid motion data is not quiet evidence.",
+            "rgba(179, 38, 30, 0.18)",
+        )
+    rms = event["motion_rms_mg"]
+    peak = event["peak_mg"]
     if peak > 300 or rms > 120:
         return _phase(
             "handling",
-            "Handling spike",
-            "Likely bumping the sensor, not useful machine rhythm.",
+            "Handling / extreme vibration",
+            "Excluded from cycle evidence; amplitude alone cannot identify the cause.",
             "rgba(179, 38, 30, 0.18)",
         )
-    if rms <= 5 and peak <= 8:
+    if rms >= MOTION_ACTIVE_RMS_MG or peak >= MOTION_ACTIVE_PEAK_MG:
+        return _phase(
+            "active",
+            "Laundry motion",
+            "Above the measured noise floor; washer versus dryer is not established.",
+            "rgba(66, 133, 244, 0.16)",
+        )
+    if rms <= MOTION_QUIET_RMS_MG:
         return _phase(
             "quiet",
             "Quiet / off",
-            "Looks like the machine is stopped or only filling quietly.",
+            "Within the measured noise envelope; could also be a quiet fill or pause.",
             "rgba(95, 128, 95, 0.18)",
-        )
-    if peak >= 120 or rms >= 60:
-        return _phase(
-            "strong",
-            "Strong wash/spin",
-            "Big machine movement, usually washer agitation or spin.",
-            "rgba(190, 80, 52, 0.18)",
-        )
-    washer_candidate = (2.3 <= rms <= 8 and 8 <= peak <= 35) or rms >= 28 or peak >= 65
-    dryer_candidate = 12 <= rms <= 28 and 25 <= peak <= 65
-    if washer_candidate and not dryer_candidate:
-        return _phase(
-            "washer",
-            "Washer running",
-            "Washer-like value pattern: low shake with jolts, or stronger agitation/spin.",
-            "rgba(218, 157, 44, 0.18)",
-        )
-    if dryer_candidate:
-        return _phase(
-            "dryer",
-            "Dryer running",
-            "Sustained mid-level tumble pattern from the accelerometer values.",
-            "rgba(66, 133, 244, 0.16)",
-        )
-    if rms >= 3 or peak >= 8:
-        return _phase(
-            "gentle",
-            "Gentle motion",
-            "Small but real movement above the quiet baseline.",
-            "rgba(66, 133, 244, 0.14)",
         )
     return _phase(
         "settling",
-        "Mostly quiet",
-        "Near the quiet baseline with tiny movement.",
+        "Uncertain motion",
+        "Between quiet and active thresholds; not evidence of completion.",
         "rgba(95, 128, 95, 0.14)",
     )
 
@@ -669,7 +648,9 @@ def _received_timestamp(event: dict) -> datetime | None:
     return _event_timestamp({"received_at": received_at})
 
 
-def _list_notification_events(path: Path, days: int = EVENT_RETENTION_DAYS) -> list[dict]:
+def _list_notification_events(
+    path: Path, days: int = EVENT_RETENTION_DAYS
+) -> list[dict]:
     with sqlite3.connect(path) as conn:
         _prune_expired_events(conn)
         conn.row_factory = sqlite3.Row
@@ -901,9 +882,9 @@ def _monitor_html() -> str:
     .swatch.peak { background: var(--peak); }
     .swatch.phase { height: 10px; border: 1px solid rgba(32, 33, 36, 0.18); }
     .swatch.phase.quiet { background: var(--quiet); }
-    .swatch.phase.washer { background: var(--active); }
-    .swatch.phase.dryer { background: var(--gentle); }
-    .swatch.phase.strong { background: var(--strong); }
+    .swatch.phase.active { background: var(--gentle); }
+    .swatch.phase.uncertain { background: var(--quiet); }
+    .swatch.phase.invalid { background: var(--strong); }
     .swatch.notification { width: 3px; height: 16px; background: var(--warn); }
     .explainer {
       padding: 12px;
@@ -1163,9 +1144,9 @@ def _monitor_html() -> str:
         <span class="key"><span class="swatch peak"></span>Biggest jolt</span>
         <span class="key">
           <span class="swatch phase quiet"></span>
-          <span class="swatch phase washer"></span>
-          <span class="swatch phase dryer"></span>
-          <span class="swatch phase strong"></span>
+          <span class="swatch phase active" title="Motion"></span>
+          <span class="swatch phase uncertain" title="Uncertain"></span>
+          <span class="swatch phase invalid" title="Invalid / extreme"></span>
           Phase backgrounds
         </span>
         <span class="key"><span class="swatch notification"></span>Notification moments</span>
@@ -1642,69 +1623,37 @@ def _monitor_html() -> str:
     }
 
     function classifySample(sample) {
-      const rms = numeric(sample.motion_rms_mg);
-      const peak = numeric(sample.peak_mg);
+      const rms = sample.motion_rms_mg;
+      const peak = sample.peak_mg;
+      if ((sample.sample_valid !== undefined && sample.sample_valid !== true) ||
+          ![rms, peak].every(v => typeof v === 'number' && Number.isFinite(v) && v >= 0) || peak < rms) {
+        return phase('invalid', 'Sensor data unavailable',
+          'Missing or invalid motion data is not quiet evidence.', 'rgba(179, 38, 30, 0.18)');
+      }
       if (peak > 300 || rms > 120) {
-        return phase(
-          'handling',
-          'Handling spike',
-          'Likely bumping the sensor, not useful machine rhythm.',
-          'rgba(179, 38, 30, 0.18)'
-        );
+        return phase('handling', 'Handling / extreme vibration',
+          'Excluded from cycle evidence; amplitude alone cannot identify the cause.', 'rgba(179, 38, 30, 0.18)');
       }
-      if (rms <= 5 && peak <= 8) {
-        return phase(
-          'quiet',
-          'Quiet / off',
-          'Looks like the machine is stopped or only filling quietly.',
-          'rgba(95, 128, 95, 0.18)'
-        );
+      if (rms >= 4.0 || peak >= 20.0) {
+        return phase('active', 'Laundry motion',
+          'Above the measured noise floor; washer versus dryer is not established.', 'rgba(66, 133, 244, 0.16)');
       }
-      if (peak >= 120 || rms >= 60) {
-        return phase(
-          'strong',
-          'Strong wash/spin',
-          'Big machine movement, usually washer agitation or spin.',
-          'rgba(190, 80, 52, 0.18)'
-        );
+      if (rms <= 3.5) {
+        return phase('quiet', 'Quiet / off',
+          'Within the measured noise envelope; could also be a quiet fill or pause.', 'rgba(95, 128, 95, 0.18)');
       }
-      const washerValueCandidate = (rms >= 2.3 && rms <= 8 && peak >= 8 && peak <= 35) || rms >= 28 || peak >= 65;
-      const dryerValueCandidate = rms >= 12 && rms <= 28 && peak >= 25 && peak <= 65;
-      if (washerValueCandidate && !dryerValueCandidate) {
-        return phase(
-          'washer',
-          'Washer running',
-          'Washer-like value pattern: low shake with jolts, or stronger agitation/spin.',
-          'rgba(218, 157, 44, 0.18)'
-        );
-      }
-      if (dryerValueCandidate) {
-        return phase(
-          'dryer',
-          'Dryer running',
-          'Sustained mid-level tumble pattern from the accelerometer values.',
-          'rgba(66, 133, 244, 0.16)'
-        );
-      }
-      if (rms >= 3 || peak >= 8) {
-        return phase(
-          'gentle',
-          'Gentle motion',
-          'Small but real movement above the quiet baseline.',
-          'rgba(66, 133, 244, 0.14)'
-        );
-      }
-      return phase(
-        'settling',
-        'Mostly quiet',
-        'Near the quiet baseline with tiny movement.',
-        'rgba(95, 128, 95, 0.14)'
-      );
+      return phase('settling', 'Uncertain motion',
+        'Between quiet and active thresholds; not evidence of completion.', 'rgba(95, 128, 95, 0.14)');
     }
 
     function smoothedClassificationSamples(samples, windowSize = 8) {
+      let validStart = 0;
       return samples.map((sample, index) => {
-        const start = Math.max(0, index - windowSize + 1);
+        if (classifySample(sample).short === 'invalid') {
+          validStart = index + 1;
+          return { ...sample };
+        }
+        const start = Math.max(validStart, index - windowSize + 1);
         const chunk = samples.slice(start, index + 1);
         const rms = chunk.reduce((sum, item) => sum + numeric(item.motion_rms_mg), 0) / chunk.length;
         const peak = chunk.reduce((sum, item) => sum + numeric(item.peak_mg), 0) / chunk.length;
@@ -1715,39 +1664,7 @@ def _monitor_html() -> str:
     function classifySamples(samples) {
       const serverPhases = samples.map(phaseFromServerSample);
       if (serverPhases.every(Boolean)) return serverPhases;
-      let recentWasherValue = null;
-      let recentWasherAge = Infinity;
-      const smoothedSamples = smoothedClassificationSamples(samples, 8);
-      return smoothedSamples.map(sample => {
-        const base = classifySample(sample);
-
-        if (base.short === 'handling') {
-          return base;
-        }
-        if (base.short === 'washer' || base.short === 'strong') {
-          recentWasherValue = base.short === 'strong'
-            ? phase(
-                'washer',
-                'Washer running',
-                'Strong washer-like agitation or spin value pattern.',
-                'rgba(218, 157, 44, 0.18)'
-              )
-            : base;
-          recentWasherAge = 0;
-          return base;
-        }
-        if (base.short === 'dryer') {
-          recentWasherValue = null;
-          recentWasherAge = Infinity;
-          return base;
-        }
-        if (recentWasherValue && recentWasherAge < 6 && (base.short === 'quiet' || base.short === 'gentle' || base.short === 'settling')) {
-          recentWasherAge += 1;
-          return recentWasherValue;
-        }
-        recentWasherAge += 1;
-        return base;
-      });
+      return smoothedClassificationSamples(samples, 8).map(classifySample);
     }
 
     function visibleSamples() {
@@ -2033,7 +1950,9 @@ def _message_for(event: LaundryEvent) -> GotifyMessage:
 def _gotify_sender(gotify_url: str, app_token: str) -> PushMessage:
     def send(message: dict) -> None:
         url = f"{gotify_url.rstrip('/')}/message"
-        response = httpx.post(url, params={"token": app_token}, json=message, timeout=5.0)
+        response = httpx.post(
+            url, params={"token": app_token}, json=message, timeout=5.0
+        )
         response.raise_for_status()
 
     return send

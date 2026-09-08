@@ -1,10 +1,105 @@
 #include <unity.h>
 #include <initializer_list>
+#include <fstream>
+#include <cstdio>
+#include <string>
+#include <vector>
+#include <limits>
 
 #include "laundry_detector.h"
 
 void setUp() {}
 void tearDown() {}
+
+static std::vector<MotionWindow> measured_windows(const char *path, size_t expected_count) {
+  std::ifstream file(path);
+  TEST_ASSERT_TRUE_MESSAGE(file.good(), "Measured desk fixture must be available");
+  std::string line;
+  std::getline(file, line);
+  std::vector<MotionWindow> windows;
+  while (std::getline(file, line)) {
+    unsigned long t;
+    float rms, peak;
+    TEST_ASSERT_EQUAL(3, std::sscanf(line.c_str(), "%lu,%f,%f", &t, &rms, &peak));
+    windows.push_back(MotionWindow{t, 4, rms, peak});
+  }
+  TEST_ASSERT_EQUAL(expected_count, windows.size());
+  return windows;
+}
+
+static std::vector<MotionWindow> desk_noise() {
+  return measured_windows("tests/fixtures/desk_noise.csv", 17);
+}
+
+void test_entire_measured_dryer_capture_stays_running() {
+  LaundryDetector detector(telemetry_cadence_detector_config());
+  for (const auto &window : measured_windows("tests/fixtures/dryer_finishing.csv", 41)) {
+    const Decision result = detector.observe(window);
+    if (window.at_ms >= 30000UL) TEST_ASSERT_EQUAL(DetectorState::CycleRunning, result.state);
+    TEST_ASSERT_FALSE(result.should_post);
+  }
+}
+
+void test_measured_desk_noise_never_arms_a_cycle() {
+  LaundryDetector detector(telemetry_cadence_detector_config());
+  for (const auto &window : desk_noise()) {
+    const Decision decision = detector.observe(window);
+    TEST_ASSERT_EQUAL(DetectorState::Idle, decision.state);
+    TEST_ASSERT_FALSE(decision.should_post);
+  }
+}
+
+void test_measured_noise_after_tumbling_releases_power_without_device_alert() {
+  LaundryDetector detector(telemetry_cadence_detector_config());
+  for (unsigned long t = 0; t <= 600000UL; t += 10000UL) {
+    detector.observe(MotionWindow{t, 4, 42.6087f, 106.9219f});
+  }
+  TEST_ASSERT_EQUAL(DetectorState::CycleRunning, detector.state());
+  // Repeated measured noise, including all spikes, must not restart motion.
+  unsigned long t = 610000UL;
+  for (int repeat = 0; repeat < 3; repeat++) {
+    for (auto window : desk_noise()) {
+      window.at_ms = t;
+      t += 10000UL;
+      const Decision result = detector.observe(window);
+      TEST_ASSERT_FALSE(result.should_post);  // Relay owns notification evidence.
+    }
+  }
+  TEST_ASSERT_EQUAL(DetectorState::DoneSent, detector.state());
+  TEST_ASSERT_FALSE(battery_keepalive_allowed(t, detector.state(), TelemetryCadenceConfig{}));
+}
+
+void test_invalid_sensor_windows_do_not_count_as_quiet() {
+  LaundryDetector detector(telemetry_cadence_detector_config());
+  detector.observe(MotionWindow{0, 4, 42, 100});
+  detector.observe(MotionWindow{30000, 4, 42, 100});
+  for (unsigned long t = 40000; t < 700000; t += 10000) {
+    const Decision result = detector.observe(MotionWindow{t, 0, 0, 0});
+    TEST_ASSERT_EQUAL(DetectorState::CycleRunning, result.state);
+    TEST_ASSERT_FALSE(result.should_post);
+  }
+  const float nan = std::numeric_limits<float>::quiet_NaN();
+  for (auto window : {MotionWindow{700000, 4, nan, nan},
+                     MotionWindow{710000, 4, -1, 2}, MotionWindow{720000, 4, 3, 2}}) {
+    TEST_ASSERT_EQUAL(DetectorState::CycleRunning, detector.observe(window).state);
+  }
+}
+
+void test_cadence_keeps_power_for_restarted_server_quiet_countdown() {
+  for (float interruption_rms : {3.75f, 42.0f}) {
+    LaundryDetector detector(telemetry_cadence_detector_config());
+    detector.observe(MotionWindow{0, 4, 42, 100});
+    detector.observe(MotionWindow{30000, 4, 42, 100});
+    detector.observe(MotionWindow{40000, 4, 2.5f, 6});
+    // A late ambiguous or active reading restarts the server's quiet timer.
+    detector.observe(MotionWindow{320000, 4, interruption_rms, 100 * (interruption_rms / 42)});
+    const Decision shortly_after = detector.observe(MotionWindow{350000, 4, 2.5f, 6});
+    TEST_ASSERT_EQUAL(DetectorState::QuietCandidate, shortly_after.state);
+    TEST_ASSERT_TRUE(battery_keepalive_allowed(350000, shortly_after.state, TelemetryCadenceConfig{}));
+    TEST_ASSERT_EQUAL(DetectorState::DoneSent,
+        detector.observe(MotionWindow{650000, 4, 2.5f, 6}).state);
+  }
+}
 
 static MotionWindow quiet(unsigned long at_ms) {
   return MotionWindow{at_ms, 4, 0.9f, 2.0f};
@@ -486,17 +581,17 @@ void test_cadence_detector_returns_to_idle_after_single_handling_jolt() {
       telemetry_poll_ms(cadence.startup_keep_awake_ms + 1UL, quiet_again.state, cadence));
 }
 
-void test_cadence_detector_treats_quiet_washer_motion_as_active_for_sampling() {
+void test_cadence_detector_does_not_assume_noise_is_gentle_washing() {
   LaundryDetector detector(telemetry_cadence_detector_config());
 
   Decision gentle_start = detector.observe(MotionWindow{0, 4, 2.46f, 4.69f});
-  TEST_ASSERT_EQUAL(DetectorState::MotionConfirming, gentle_start.state);
+  TEST_ASSERT_EQUAL(DetectorState::Idle, gentle_start.state);
 
   Decision confirmed = detector.observe(MotionWindow{30UL * 1000UL + 1UL, 4, 3.01f, 5.35f});
-  TEST_ASSERT_EQUAL(DetectorState::CycleRunning, confirmed.state);
+  TEST_ASSERT_EQUAL(DetectorState::Idle, confirmed.state);
 }
 
-void test_cadence_done_decision_requests_explicit_done_notification() {
+void test_cadence_done_leaves_notification_evidence_to_the_relay() {
   LaundryDetector detector(telemetry_cadence_detector_config());
 
   detector.observe(MotionWindow{0, 4, 20.0f, 104.0f});
@@ -511,8 +606,8 @@ void test_cadence_done_decision_requests_explicit_done_notification() {
 
   Decision done = detector.observe(MotionWindow{30UL * 60UL * 1000UL + 1UL, 4, 1.0f, 2.0f});
   TEST_ASSERT_EQUAL(DetectorState::DoneSent, done.state);
-  TEST_ASSERT_TRUE(done.should_post);
-  TEST_ASSERT_TRUE(should_post_done_event(done));
+  TEST_ASSERT_FALSE(done.should_post);
+  TEST_ASSERT_FALSE(should_post_done_event(done));
 
   Decision duplicate = detector.observe(MotionWindow{32UL * 60UL * 1000UL, 4, 1.0f, 2.0f});
   TEST_ASSERT_EQUAL(DetectorState::DoneSent, duplicate.state);
@@ -608,6 +703,11 @@ void test_wireless_updates_require_settled_idle_state() {
 
 int main() {
   UNITY_BEGIN();
+  RUN_TEST(test_cadence_keeps_power_for_restarted_server_quiet_countdown);
+  RUN_TEST(test_entire_measured_dryer_capture_stays_running);
+  RUN_TEST(test_invalid_sensor_windows_do_not_count_as_quiet);
+  RUN_TEST(test_measured_desk_noise_never_arms_a_cycle);
+  RUN_TEST(test_measured_noise_after_tumbling_releases_power_without_device_alert);
   RUN_TEST(test_wireless_updates_require_settled_idle_state);
   RUN_TEST(test_waiting_for_initial_motion_uses_bounded_keepalive_not_continuous_radio);
   RUN_TEST(test_startup_ignores_handling_then_waits_through_quiet_fill);
@@ -635,8 +735,8 @@ int main() {
   RUN_TEST(test_battery_keepalive_splits_long_idle_nap_with_awake_pulse);
   RUN_TEST(test_battery_keepalive_does_not_split_short_running_nap);
   RUN_TEST(test_cadence_detector_returns_to_idle_after_single_handling_jolt);
-  RUN_TEST(test_cadence_detector_treats_quiet_washer_motion_as_active_for_sampling);
-  RUN_TEST(test_cadence_done_decision_requests_explicit_done_notification);
+  RUN_TEST(test_cadence_detector_does_not_assume_noise_is_gentle_washing);
+  RUN_TEST(test_cadence_done_leaves_notification_evidence_to_the_relay);
   RUN_TEST(test_nap_duration_keeps_sample_start_cadence_near_target_interval);
   RUN_TEST(test_aligned_wall_clock_nap_targets_next_interval_boundary);
   return UNITY_END();

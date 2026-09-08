@@ -1,0 +1,13 @@
+.git
+.env
+.env.*
+!.env.example
+.pio
+.pytest_cache
+__pycache__
+*.py[cod]
+data
+outputs
+.terraform
+*.tfstate
+*.tfstate.*
