@@ -40,7 +40,7 @@ The local detector ignores the first thirty seconds of movement. Only that
 settling period keeps the CPU and Wi-Fi continuously awake. It then uses light
 sleep between ten-second checks, with periodic bank-load pulses, for up to five
 minutes from boot to detect a start. An established cycle retains fast sampling
-and keepalive through the quiet completion window after that deadline. If it is
+and power support through the quiet completion window after that deadline. If it is
 still idle at the deadline, the device allows the bank to shut off; a later start
 may therefore require pressing the bank button again. The five-minute allowance
 is not a claim about the washer's fill time.
@@ -51,6 +51,31 @@ sleep should report `last_light_sleep_result: 0`; keepalive counts should increa
 while waiting for motion. This replaces the fifteen-minute continuous-radio
 policy. Actual bank power consumption and minimum keepalive load are unmeasured;
 USB tests cannot validate either. Logs distinguish requested sleep from reboots.
+
+## Active-cycle power recovery (2026-09-09)
+
+During motion confirmation, running and the quiet completion window, firmware
+now retains connected Wi-Fi with modem sleep disabled and uses awake delays
+instead of light sleep. Periodic radio pulses are bypassed in those states so
+their cleanup cannot turn the radio off. Normal signed telemetry supplies real
+network activity at the existing cadence; connection failures still retry.
+Idle/done retain the existing power-saving and eventual bank-shutdown policy.
+Diagnostics report `active_continuous_power` to distinguish this policy from
+the older pulse counter, which no longer advances during an active cycle.
+
+This deliberately spends more battery to remove long low-draw gaps. The old
+nominal 25-second pulse interval was measured from pulse completion, not start;
+with eight-second pulses and loop delays, observed completion intervals were
+33–46 seconds during the failed running session. Neither radio-on time nor
+this recovery mode proves a specific current draw or guarantees bank retention.
+Validate on the battery bank, not just USB; voltage/current remain unmeasured.
+
+The owner explicitly requested an immediate OTA recovery during the running
+dryer cycle on 2026-09-09, accepting interruption of monitoring. This is a
+one-off device-maintenance exception to the normal between-loads rule, not
+authorization to redeploy the relay. Build with the existing device configuration,
+run native regressions, retain the source commit, and require signed post-boot
+telemetry matching the staged image hash before calling installation successful.
 
 For the first flash, connect the ESP32 by USB to the laptop. After it is flashed,
 return it to the battery bank for remote diagnostics. USB-powered tests alone

@@ -711,8 +711,18 @@ void test_wireless_updates_require_settled_idle_state() {
   }
 }
 
+void test_active_cycle_keeps_radio_awake_until_idle_or_done() {
+  for (DetectorState state : {DetectorState::MotionConfirming, DetectorState::CycleRunning,
+                             DetectorState::QuietCandidate}) {
+    TEST_ASSERT_TRUE(active_cycle_requires_continuous_power(state));
+  }
+  TEST_ASSERT_FALSE(active_cycle_requires_continuous_power(DetectorState::Idle));
+  TEST_ASSERT_FALSE(active_cycle_requires_continuous_power(DetectorState::DoneSent));
+}
+
 int main() {
   UNITY_BEGIN();
+  RUN_TEST(test_active_cycle_keeps_radio_awake_until_idle_or_done);
   RUN_TEST(test_mounted_off_capture_never_confirms_motion);
   RUN_TEST(test_cadence_keeps_power_for_restarted_server_quiet_countdown);
   RUN_TEST(test_entire_measured_dryer_capture_stays_running);

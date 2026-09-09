@@ -352,6 +352,12 @@ bool should_post_done_event(const Decision &decision) {
   return decision.should_post && decision.state == DetectorState::DoneSent;
 }
 
+bool active_cycle_requires_continuous_power(DetectorState state) {
+  return state == DetectorState::MotionConfirming ||
+         state == DetectorState::CycleRunning ||
+         state == DetectorState::QuietCandidate;
+}
+
 unsigned long active_cycle_load_pulse_ms(unsigned long now_ms,
                                          DetectorState state,
                                          unsigned long last_pulse_ms,
