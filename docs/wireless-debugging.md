@@ -77,6 +77,15 @@ authorization to redeploy the relay. Build with the existing device configuratio
 run native regressions, retain the source commit, and require signed post-boot
 telemetry matching the staged image hash before calling installation successful.
 
+Recovery installation was confirmed by signed telemetry at 2026-09-09 03:29:25
+UTC: source commit `f1ee837`, build `Sep 9 2026 03:28:43`, OTA job
+`112de2fcc0dc4fdc8cda586302bc4472`, and running-image SHA-256
+`a1c260cd027903ad3a52d401ff4d6b4151db7daecf53cdcda1f29a0056a3d7bc`.
+The device reported the expected software reboot, retained OTA capability, then
+enabled `active_continuous_power` after settling. The pinned ESP32 build, all
+38 native tests and 102 relay tests passed locally. This confirms installation
+and initial operation, not a complete-cycle battery-retention test.
+
 For the first flash, connect the ESP32 by USB to the laptop. After it is flashed,
 return it to the battery bank for remote diagnostics. USB-powered tests alone
 cannot establish whether the bank will stay on. After the OTA-capable bootstrap
