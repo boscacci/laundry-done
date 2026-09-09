@@ -1,4 +1,4 @@
-"""Owner-labeled stationary desk and finishing-dryer regressions."""
+"""Owner-labeled stationary and running-dryer regressions."""
 
 import csv
 from datetime import timedelta
@@ -32,6 +32,38 @@ def test_entire_measured_dryer_capture_is_motion_not_an_appliance_guess(tmp_path
     assert len(samples) == 41
     assert {_classify_server_event(s)["short"] for s in samples} == {"active"}
     assert set(_classify_with_dashboard_js(tmp_path, samples)) == {"active"}
+
+
+def test_delicates_motion_stays_active_without_smoothing_the_jolt_into_evidence(tmp_path):
+    samples = measured_windows("dryer_delicates")
+    assert len(samples) == 34
+    expected = ["active"] * len(samples)
+    expected[3] = "handling"
+    assert [_classify_server_event(s)["short"] for s in samples] == expected
+    assert [p["short"] for p in _server_base_phases(samples)] == expected
+    assert _classify_with_dashboard_js(tmp_path, samples) == expected
+
+
+@pytest.mark.parametrize("rms,peak", [(183.7896, 972.2512), (2, 301), (121, 150)])
+def test_jolts_cannot_be_smoothed_into_activity_or_contaminate_quiet(tmp_path, rms, peak):
+    quiet = {"motion_rms_mg": 1, "peak_mg": 3}
+    samples = [quiet] * 8 + [{"motion_rms_mg": rms, "peak_mg": peak}] + [quiet] * 8
+    expected = ["quiet"] * 8 + ["handling"] + ["quiet"] * 8
+    assert [p["short"] for p in _server_base_phases(samples)] == expected
+    assert _classify_with_dashboard_js(tmp_path, samples) == expected
+
+
+def test_periodic_jolts_in_idle_cannot_arm_completion(monitor):  # noqa: F811
+    for seconds in range(0, 1500, 10):
+        jolt = seconds < 1200 and seconds % 70 == 60
+        payload = _calibration_payload(
+            event_id=f"jolt-{seconds}",
+            at=START + timedelta(seconds=seconds),
+            rms=183.7896 if jolt else 1,
+            peak=972.2512 if jolt else 3,
+        )
+        assert _post(monitor[0], "test-secret", payload).status_code == 202
+    assert monitor[1] == []
 
 
 def test_mounted_off_capture_settles_without_arming_or_notifying(monitor, tmp_path):  # noqa: F811
