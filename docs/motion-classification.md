@@ -21,6 +21,13 @@ No outliers were removed and missing packets were not interpolated.
   2026-09-08 08:28:54–08:34:09 UTC, 22 delivered packets. RMS 0.898–4.447 mg;
   peak 1.564–13.477 mg. The lone reading above the active RMS threshold is
   isolated and does not satisfy the 30-second start confirmation.
+- `dryer_delicates.csv`: owner reports the usual delicates dryer cycle running,
+  2026-09-09 02:56:49–03:05:06 UTC, 34 delivered packets. Washer state was not
+  confirmed, so this is not evidence for appliance identity. The 33 non-extreme
+  windows measure RMS 23.362–34.677 mg and peak 46.876–88.114 mg. One extreme
+  window measures RMS 183.790 mg / peak 972.251 mg; its cause is unknown and it
+  remains in the fixture. This is a partial running capture, not a complete
+  cycle or an observed stop. Original relative uptime preserves upload gaps.
 
 All captures were selected read-only from relay SQLite `events`, filtered by the device,
 `state='calibration_sample'` and the half-open `received_at` intervals above,
@@ -38,6 +45,12 @@ differences over four seconds, not absolute acceleration or a frequency spectrum
   and four minutes of raw quiet confirmed by the smoothed signal. A long upload
   gap, reboot or invalid sample is not quiet evidence. Raw noise spikes inside
   the measured envelope no longer restart the countdown.
+- Extreme raw readings (peak > 300 mg or RMS > 120 mg) are classified before
+  smoothing and reset its window, just like invalid readings. They are neither
+  activity nor quiet evidence and cannot bleed into subsequent readings. This
+  fixes a regression where periodic jolts during idle could arm a false alert.
+  The delicates capture confirms the existing active thresholds; it does not
+  justify raising them or claiming an appliance-specific classifier.
 - The production local detector is a power/cadence controller only. After five
   minutes of quiet it releases keepalive, regardless of whether a brief apparent
   run qualified for notification. It does not send its own completion alert.

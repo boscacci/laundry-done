@@ -540,7 +540,9 @@ def _smoothed_events(events: list[dict], window_size: int) -> list[dict]:
     smoothed = []
     valid_start = 0
     for index, event in enumerate(events):
-        if not _motion_values_valid(event):
+        # Check raw outliers before averaging: a single jolt diluted across
+        # eight windows otherwise becomes sustained, plausible cycle motion.
+        if _classify_server_event(event)["short"] in {"invalid", "handling"}:
             smoothed.append(dict(event))
             valid_start = index + 1
             continue
@@ -1649,7 +1651,7 @@ def _monitor_html() -> str:
     function smoothedClassificationSamples(samples, windowSize = 8) {
       let validStart = 0;
       return samples.map((sample, index) => {
-        if (classifySample(sample).short === 'invalid') {
+        if (['invalid', 'handling'].includes(classifySample(sample).short)) {
           validStart = index + 1;
           return { ...sample };
         }
