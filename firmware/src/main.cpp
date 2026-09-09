@@ -420,7 +420,8 @@ bool battery_keep_awake_active() {
 }
 
 void maybe_sleep_wifi() {
-  if (LAUNDRY_KEEP_WIFI_CONNECTED || battery_keep_awake_active()) {
+  if (LAUNDRY_KEEP_WIFI_CONNECTED || battery_keep_awake_active() ||
+      active_cycle_requires_continuous_power(telemetry_cadence_detector.state())) {
     return;
   }
   WiFi.disconnect(true);
@@ -464,6 +465,11 @@ void power_bank_keepalive_pulse(unsigned long duration_ms, unsigned long remaini
 }
 
 void maybe_active_cycle_load_pulse(DetectorState state, unsigned long *nap_ms) {
+  // Active-cycle recovery mode keeps the radio on continuously. A load pulse
+  // would disconnect it again at the end and defeat that power floor.
+  if (active_cycle_requires_continuous_power(state)) {
+    return;
+  }
   // During startup the radio remains connected between packets already.
   if (battery_keep_awake_active()) {
     return;
@@ -494,8 +500,8 @@ void nap(unsigned long nap_ms, DetectorState state) {
   if (nap_ms == 0) {
     return;
   }
-  if (battery_keep_awake_active()) {
-    Serial.printf("sleep mode=startup_awake duration_ms=%lu\n", nap_ms);
+  if (battery_keep_awake_active() || active_cycle_requires_continuous_power(state)) {
+    Serial.printf("sleep mode=continuous_awake duration_ms=%lu\n", nap_ms);
     delay(nap_ms);
     return;
   }
@@ -673,6 +679,8 @@ bool post_calibration_sample_event(uint32_t event_counter,
   diagnostics["version"] = 1;
   diagnostics["reset_reason"] = static_cast<int>(esp_reset_reason());
   diagnostics["detector_state"] = detector_state_to_string(telemetry_cadence_detector.state());
+  diagnostics["active_continuous_power"] =
+      active_cycle_requires_continuous_power(telemetry_cadence_detector.state());
   diagnostics["startup_keep_awake"] = battery_keep_awake_active();
   diagnostics["startup_settling"] = window.at_ms < kTelemetryCadence.startup_settle_ms;
   diagnostics["light_sleep_enabled"] = LAUNDRY_USE_LIGHT_SLEEP != 0;

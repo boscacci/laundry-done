@@ -10,6 +10,7 @@ DIAGNOSTIC_FIELDS = (
     "version",
     "reset_reason",
     "detector_state",
+    "active_continuous_power",
     "startup_keep_awake",
     "startup_settling",
     "light_sleep_enabled",

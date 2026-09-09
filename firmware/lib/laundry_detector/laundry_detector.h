@@ -185,6 +185,8 @@ BatteryKeepaliveNap next_battery_keepalive_nap(unsigned long remaining_nap_ms,
 
 bool should_post_done_event(const Decision &decision);
 
+bool active_cycle_requires_continuous_power(DetectorState state);
+
 unsigned long active_cycle_load_pulse_ms(unsigned long now_ms,
                                          DetectorState state,
                                          unsigned long last_pulse_ms,
