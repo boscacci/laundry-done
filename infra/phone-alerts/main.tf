@@ -81,7 +81,6 @@ resource "aws_connect_phone_number" "shared" {
   target_arn   = aws_connect_instance.shared.arn
   country_code = "US"
   type         = "DID"
-  prefix       = "+1"
   description  = "Shared personal project alert caller ID"
   lifecycle {
     prevent_destroy = true

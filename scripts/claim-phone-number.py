@@ -38,7 +38,7 @@ def main():
         raise SystemExit(
             "Multiple numbers found; resolve ownership before claiming another"
         )
-    arn = existing[0]["PhoneNumberArn"] if existing else None
+    arn = existing[0]["PhoneNumberId"] if existing else None
     if arn is None:
         for prefix in ["+1206", "+1425", "+1650", "+1415", "+1"]:
             candidates = client.search_available_phone_numbers(
@@ -65,7 +65,7 @@ def main():
                             "Environment": "dev",
                         },
                     )
-                    arn = result["PhoneNumberArn"]
+                    arn = result["PhoneNumberId"]
                     break
                 except ClientError as exc:
                     if exc.response["Error"]["Code"] != "InvalidParameterException":
@@ -74,7 +74,7 @@ def main():
                 break
     if arn is None:
         raise SystemExit("No claimable US number found; request AWS inventory support")
-    # The CLI import reports only the ARN; destination and originating digits are
+    # The CLI import reports only the resource ID; destination and originating digits are
     # never written into this source file or printed by this script.
     subprocess.run(
         [
