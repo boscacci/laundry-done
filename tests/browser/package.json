@@ -1,0 +1,1 @@
+{"name":"laundry-browser-smoke","private":true,"devDependencies":{"playwright":"1.58.2"},"scripts":{"test":"node smoke.cjs"}}

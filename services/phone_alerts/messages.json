@@ -1,0 +1,19 @@
+{
+  "version": "v1",
+  "voice": "Joanna",
+  "engine": "neural",
+  "messages": {
+    "laundry-01": "Laundry update. Your laundry appears finished. The stack has gone quiet. Time to check your load.",
+    "laundry-02": "Laundry update. The spin council has adjourned. Your laundry appears finished. Please check the load.",
+    "laundry-03": "Laundry update. Your socks have requested extraction. The laundry stack is quiet. Please check your load.",
+    "laundry-04": "Laundry update. Attention, captain. The laundry mission appears complete. Retrieve the textiles.",
+    "laundry-05": "Laundry update. The clothes have stopped doing whatever clothes do in there. Your load may be ready.",
+    "laundry-06": "Laundry update. This is your extremely small laundry department. The stack is quiet. Please investigate.",
+    "laundry-07": "Laundry update. The textile situation has stabilized. Your laundry appears finished. Go check it.",
+    "laundry-08": "Laundry update. A tiny robot believes your laundry is done. The robot requests human verification.",
+    "laundry-09": "Laundry update. Your laundry has entered its mysterious silent era. Please check whether the load is finished.",
+    "laundry-10": "Laundry update. The laundry goblin reports silence. Your load appears finished. Please collect your belongings.",
+    "fallback": "Laundry update. Your laundry appears finished. Please check your load.",
+    "test": "This is a test of your personal project phone alerts. Your phone alert service is working. No laundry completion is implied."
+  }
+}

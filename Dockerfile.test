@@ -25,6 +25,7 @@ COPY --chown=tester:tester server/pytest.ini ./server/pytest.ini
 COPY --chown=tester:tester server/src ./server/src
 COPY --chown=tester:tester server/tests ./server/tests
 COPY --chown=tester:tester tests ./tests
+COPY --chown=tester:tester services/phone_alerts ./services/phone_alerts
 
 USER tester
 
