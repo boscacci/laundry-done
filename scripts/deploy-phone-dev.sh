@@ -2,7 +2,9 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 [[ -z "$(git status --porcelain)" ]] || { echo 'Clean reviewed commit required' >&2; exit 1; }
+commit="$(git rev-parse HEAD)"
 scripts/validate.sh
+[[ "$(git rev-parse HEAD)" == "$commit" && -z "$(git status --porcelain)" ]] || { echo "Source changed during validation" >&2; exit 1; }
 scripts/prepare-phone-identity.sh
 export TF_VAR_certificate_bundle
 TF_VAR_certificate_bundle="$(cat "${LAUNDRY_IDENTITY_DIR:-$PWD/data/phone-identity}/ca.pem")"

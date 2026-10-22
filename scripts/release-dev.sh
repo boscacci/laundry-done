@@ -13,11 +13,12 @@ builder="laundry-release-${commit:0:12}"
 cleanup() { docker buildx rm "$builder" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 scripts/validate.sh
+[[ "$(git rev-parse HEAD)" == "$commit" && -z "$(git status --porcelain)" ]] || { echo "Source changed during validation" >&2; exit 1; }
 docker buildx create --name "$builder" --driver docker-container >/dev/null
 aws ecr get-login-password --region us-west-2 | docker login --username AWS --password-stdin "${registry%%/*}" >/dev/null
 mkdir -p outputs/releases
 if ! aws ecr describe-images --repository-name laundry-done --image-ids "imageTag=git-$commit" --region us-west-2 >/dev/null 2>&1; then
-  docker buildx build --builder "$builder" --file server/Dockerfile --tag "$registry:git-$commit" --label "org.opencontainers.image.revision=$commit" --push server
+  git archive "$commit:server" | docker buildx build --builder "$builder" --file Dockerfile --tag "$registry:git-$commit" --label "org.opencontainers.image.revision=$commit" --push -
 fi
 digest="$(aws ecr describe-images --repository-name laundry-done --image-ids "imageTag=git-$commit" --region us-west-2 --query 'imageDetails[0].imageDigest' --output text)"
 [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]] || exit 1

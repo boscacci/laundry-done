@@ -213,3 +213,20 @@ def test_expired_monitor_does_not_extend_four_hour_limit(tmp_path):
         delivery.status(path, "laundry-stack-1", now=14501)["session"]["status"]
         == "expired"
     )
+
+
+def test_https_origin_is_valid_behind_tls_proxy_without_trusting_forwarded_headers(
+    tmp_path,
+):
+    path, client = setup(tmp_path)
+    response = client.post(
+        "/api/v1/control",
+        json={"action": "start"},
+        headers={
+            "x-laundry-admin-secret": "test-secret",
+            "Idempotency-Key": "tls-start",
+            "Host": "laundry.example",
+            "Origin": "https://laundry.example",
+        },
+    )
+    assert response.status_code == 200

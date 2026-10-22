@@ -164,7 +164,11 @@ def create_app(
     ):
         require_admin(request, x_laundry_admin_secret)
         origin = request.headers.get("origin")
-        if origin and origin != str(request.base_url).rstrip("/"):
+        expected_origins = {
+            str(request.base_url).rstrip("/"),
+            "https://" + request.headers.get("host", ""),
+        }
+        if origin and origin not in expected_origins:
             raise HTTPException(status_code=403, detail="origin denied")
         if not 1 <= len(idempotency_key) <= 128:
             raise HTTPException(status_code=422, detail="Idempotency-Key required")
