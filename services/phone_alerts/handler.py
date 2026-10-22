@@ -273,4 +273,6 @@ def handler(event, context):
                 }
             )
         )
-        raise
+        # Preserve platform retry behavior without logging provider exception
+        # strings, which may include the configured phone number.
+        raise RuntimeError("dispatcher operation failed") from None

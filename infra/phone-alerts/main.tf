@@ -138,8 +138,8 @@ resource "aws_s3_bucket_policy" "audio" {
 
       Effect = "Allow", Principal = {
         Service = "connect.amazonaws.com"
-      }, Action = "s3:GetObject",
-      Resource = "${aws_s3_bucket.audio.arn}/*", Condition = {
+      }, Action = ["s3:ListBucket", "s3:GetObject"],
+      Resource = [aws_s3_bucket.audio.arn, "${aws_s3_bucket.audio.arn}/*"], Condition = {
         StringEquals = {
           "aws:SourceAccount" = data.aws_caller_identity.current.account_id
           }, ArnEquals = {

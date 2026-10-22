@@ -46,8 +46,9 @@ def main():
     folder.mkdir(mode=0o700, exist_ok=True)
     for name in ["worker.pem", "worker.key"]:
         target = folder / name
-        if not target.exists():
-            target.write_bytes((folder.parent / name).read_bytes())
+        source = (folder.parent / name).read_bytes()
+        if not target.exists() or target.read_bytes() != source:
+            target.write_bytes(source)
         os.chmod(target, 0o600)
     config = folder / "config"
     config.write_text(
