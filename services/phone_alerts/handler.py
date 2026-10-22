@@ -53,7 +53,10 @@ class DynamoStore:
         return value
 
     def pending(self):
-        args = {"FilterExpression": "attribute_exists(project)"}
+        args = {
+            "FilterExpression": "attribute_exists(#project)",
+            "ExpressionAttributeNames": {"#project": "project"},
+        }
         while True:
             result = self.table.scan(**args)
             for row in result["Items"]:
@@ -146,7 +149,6 @@ def engine():
             DestinationPhoneNumber=destination,
             SourcePhoneNumber=os.environ["SOURCE_NUMBER"],
             ClientToken=f"{job['id']}-{attempt}",
-            RingTimeoutInSeconds=45,
             Attributes={
                 "job_id": job["id"],
                 "project_id": job["project"],
@@ -269,6 +271,10 @@ def handler(event, context):
                 {
                     "event": "dispatcher_error",
                     "error": type(exc).__name__,
+                    "provider_code": getattr(exc, "response", {})
+                    .get("Error", {})
+                    .get("Code"),
+                    "operation": getattr(exc, "operation_name", None),
                     "request_id": context.aws_request_id,
                 }
             )
