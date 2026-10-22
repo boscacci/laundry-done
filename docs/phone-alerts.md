@@ -15,7 +15,7 @@ Manager; browser and device payloads cannot choose phone numbers.
    dev stack from that clean commit, with calling disabled, and uploads audio.
 5. Set LAUNDRY_REGISTRY to the IaC repository_url output and run
    `scripts/release-dev.sh`. It builds/publishes once, deploys by digest, and runs
-   browser smoke checks at http://127.0.0.1:8090/monitor with simulated calls.
+   browser smoke checks at http://127.0.0.1:18088/monitor with simulated calls.
 
 Install browser dependencies with `npm ci --prefix tests/browser` and
 `tests/browser/node_modules/.bin/playwright install chromium`, or set

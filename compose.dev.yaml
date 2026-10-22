@@ -9,7 +9,7 @@ services:
       ALERT_BACKEND: simulation
       AUDIO_DIRECTORY: /audio
     ports:
-      - "127.0.0.1:8090:8080"
+      - "127.0.0.1:18088:8080"
     volumes:
       - ./data/dev:/data
       - ./outputs/audio/v1:/audio:ro

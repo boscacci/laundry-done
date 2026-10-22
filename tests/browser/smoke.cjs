@@ -4,7 +4,7 @@ const assert=require('node:assert/strict');
   const browser=await chromium.launch({headless:true,...(process.env.PLAYWRIGHT_CHROMIUM ? {executablePath:process.env.PLAYWRIGHT_CHROMIUM} : {})});
   const page=await browser.newPage();const errors=[];
   page.on('pageerror',e=>errors.push(e.message));
-  const base=process.env.SMOKE_URL || 'http://127.0.0.1:8090';
+  const base=process.env.SMOKE_URL || 'http://127.0.0.1:18088';
   const secret=process.env.SMOKE_ADMIN_SECRET;
   const headers=secret ? {'x-laundry-admin-secret':secret} : {};
   await page.setExtraHTTPHeaders(headers);

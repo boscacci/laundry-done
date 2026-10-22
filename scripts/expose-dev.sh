@@ -10,4 +10,4 @@ gateway="$(docker network inspect laundry-done-dev_default --format '{{(index .I
 sed -i '/^MONITOR_TAILSCALE_IPS=/d; /^TRUSTED_PROXY_IPS=/d' outputs/dev.env
 printf 'MONITOR_TAILSCALE_IPS=100.64.0.0/10\nTRUSTED_PROXY_IPS=%s\n' "$gateway" >> outputs/dev.env
 docker compose -f compose.dev.yaml up -d --no-build --wait relay
-tailscale serve --bg --https=8445 http://127.0.0.1:8090
+tailscale serve --bg --https=18445 http://127.0.0.1:18088

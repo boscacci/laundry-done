@@ -35,7 +35,7 @@ docker compose -f compose.dev.yaml up -d --wait
 set -a
 source outputs/dev.env
 set +a
-SMOKE_URL=http://127.0.0.1:8090 SMOKE_ADMIN_SECRET="$DEVICE_SECRET" node tests/browser/smoke.cjs
+SMOKE_URL=http://127.0.0.1:18088 SMOKE_ADMIN_SECRET="$DEVICE_SECRET" node tests/browser/smoke.cjs
 unset DEVICE_SECRET
 printf '{"commit":"%s","image":"%s","environment":"dev","smoke":"passed"}\n' "$commit" "$RELAY_IMAGE" > "outputs/releases/$commit.json"
 df -h .
