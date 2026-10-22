@@ -4,6 +4,35 @@ Status: implementation in progress, October 22, 2026. Automated validation and
 dev deployment precede real-phone and owner-observed load acceptance. Production
 cutover and Gotify retirement remain gated on that acceptance.
 
+### Current delivery status
+
+Implemented: durable completion/outbox, bounded monitoring leases, authenticated
+dashboard controls, simulated dev worker, shared AWS Connect number, private
+prerecorded audio library, IAM-authenticated dispatcher, short-lived worker
+credentials, deployment scripts, and isolated dev browser smoke tests.
+
+The owner confirmed hearing the complete prerecorded real-phone test on October
+22. AWS recorded completed playback on attempt one. This proves answered-call
+delivery; it does not establish voicemail or unanswered-call retry acceptance.
+
+Remaining acceptance and release work:
+
+- Observe unanswered-call retry, voicemail timing, carrier filtering, and Do Not
+  Disturb behavior. Listen to every clip; generation and format checks alone do
+  not establish intelligibility.
+- Capture three washer and three dryer cycles, freeze detector parameters, and
+  validate independent captures. Validate the monitoring lease on the physical
+  power bank and install firmware between loads.
+- Finish production cloud isolation and promotion of versioned cloud/flow/audio
+  artifacts; current cloud deployment is dev. Do not point production at dev.
+- Complete failure-alarm injection and remaining operational metrics, cost
+  visibility, certificate renewal, and production release/rollback exercises.
+- Review the documented base-image security findings before production approval.
+- Merge the validated release candidate, obtain one recorded production approval
+  after manual dev smoke, deploy, observe real loads, then retire Gotify.
+
+Production, device firmware, and existing Gotify hosting remain unchanged.
+
 ## Goal and agreed behavior
 
 Recognize finished laundry reliably, call the owner's US cell phone, and make

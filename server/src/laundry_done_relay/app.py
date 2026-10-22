@@ -359,11 +359,11 @@ def _store_event(path: Path, event: LaundryEvent, raw_body: bytes) -> bool:
                     raw_body.decode("utf-8"),
                 ),
             )
-            if event.state == "done_sent":
-                delivery.enqueue_completion(conn, event, json.loads(raw_body))
-            return False
         except sqlite3.IntegrityError:
             return True
+        if event.state == "done_sent":
+            delivery.enqueue_completion(conn, event, json.loads(raw_body))
+        return False
 
 
 def _done_sent_for_cycle_exists(path: Path, event: LaundryEvent) -> bool:

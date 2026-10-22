@@ -2,6 +2,10 @@
 services:
   relay:
     image: ${RELAY_IMAGE:?Set approved immutable RELAY_IMAGE}
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    read_only: true
+    tmpfs: [/tmp]
     environment:
       ALERT_BACKEND: voice
       AUDIO_DIRECTORY: /audio

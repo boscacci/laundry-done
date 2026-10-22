@@ -230,3 +230,16 @@ def test_https_origin_is_valid_behind_tls_proxy_without_trusting_forwarded_heade
         },
     )
     assert response.status_code == 200
+
+
+def test_outbox_insert_failure_rolls_back_completion_event(tmp_path, monkeypatch):
+    path, client = setup(tmp_path)
+
+    def fail(*args):
+        raise sqlite3.IntegrityError("outbox failure")
+
+    monkeypatch.setattr(delivery, "enqueue_completion", fail)
+    with pytest.raises(sqlite3.IntegrityError, match="outbox failure"):
+        done(client)
+    with sqlite3.connect(path) as db:
+        assert db.execute("select count(*) from events").fetchone()[0] == 0

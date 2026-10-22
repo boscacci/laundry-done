@@ -65,6 +65,11 @@ there are no outage emails or operational calls.
 
 ## Production and rollback
 
+The current implementation is a dev pilot, not a production-ready cutover.
+Production cloud isolation, cloud/flow artifact promotion, physical load
+acceptance, and failure-alarm injection remain tracked in PLAN.md. Do not use the
+promotion scaffold until those prerequisites are complete.
+
 Production is a separate release decision. Preserve the existing stack until
 phone acceptance. Cut an annotated version tag on the default-branch dev-tested
 commit. A durable human approval record identifies tag, exact image digest,
@@ -81,3 +86,21 @@ telemetry. Device OTA is between loads, with installed-image hash confirmation.
 Historical done_sent events retain unverified delivery status and are not replayed.
 Retire Gotify only after real phone and load acceptance, preserving its data and
 all unrelated shared front-door routes.
+
+## Runtime image security review (October 22, 2026)
+
+The current pinned Bookworm base has seven HIGH, two MEDIUM, and two LOW ECR
+findings, with no CRITICAL findings. The HIGH findings concern util-linux and
+zlib. Debian's available Bookworm packages have no fixes for these findings at
+this review; switching to the inspected Trixie base does not resolve them.
+Python runtime dependency auditing reports no known vulnerabilities.
+
+The image runs as UID 10001, strips setuid/setgid file bits, and dev/release
+services drop all capabilities, prohibit privilege escalation, and use read-only
+root filesystems. These controls reduce exposure; they do not establish that all
+findings are inapplicable. Track fixed base digests and rebuild/retest when
+available. Production approval must explicitly address these unresolved findings.
+
+Primary advisories:
+[util-linux](https://security-tracker.debian.org/tracker/CVE-2026-76642) and
+[zlib](https://security-tracker.debian.org/tracker/CVE-2026-85091).

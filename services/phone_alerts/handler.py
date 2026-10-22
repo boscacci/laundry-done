@@ -157,7 +157,7 @@ def engine():
         )
         print(
             json.dumps(
-                {"event": "call_accepted", "job_id": job["id"], "attempt": attempt}
+                {"event": "call_accepted", "job_id": job["id"], "attempt": int(attempt)}
             )
         )
         return result["ContactId"]
