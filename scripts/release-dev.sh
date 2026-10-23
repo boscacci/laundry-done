@@ -23,6 +23,7 @@ fi
 digest="$(aws ecr describe-images --repository-name laundry-done --image-ids "imageTag=git-$commit" --region us-west-2 --query 'imageDetails[0].imageDigest' --output text)"
 [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]] || exit 1
 export RELAY_IMAGE="$registry@$digest"
+conda run --no-capture-output -n "${LAUNDRY_CONDA_ENV:-dell}" python scripts/check-image-security.py --tag "git-$commit" --expected-digest "$digest" --record "outputs/releases/$commit.security.json"
 # No production credentials or production data are needed for simulated dev.
 mkdir -p data/dev
 if [[ ! -f outputs/dev.env ]]; then

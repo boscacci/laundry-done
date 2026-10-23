@@ -224,7 +224,7 @@ def handler(event, context):
                 raise ValueError("wrong instance")
             attrs = contact["Attributes"]
             kind = data["Parameters"]["outcome"]
-            if kind not in {"completed", "failed"}:
+            if kind not in {"completed", "failed", "no_answer"}:
                 raise ValueError("invalid callback")
             d.outcome(attrs["job_id"], contact["ContactId"], kind)
             return {"ok": "true"}

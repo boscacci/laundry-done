@@ -13,12 +13,13 @@ credentials, deployment scripts, and isolated dev browser smoke tests.
 
 The owner confirmed hearing the complete prerecorded real-phone test on October
 22. AWS recorded completed playback on attempt one. This proves answered-call
-delivery; it does not establish voicemail or unanswered-call retry acceptance.
+delivery under the original flow. The new silent keypad gate requires a fresh
+answered-call test and an unanswered-call test.
 
 Remaining acceptance and release work:
 
-- Observe unanswered-call retry, voicemail timing, carrier filtering, and Do Not
-  Disturb behavior. Listen to every clip; generation and format checks alone do
+- Verify that voicemail receives no audio, a human keypress unlocks playback,
+  and unanswered calls retry once. Test carrier filtering and Do Not Disturb. Listen to every clip; generation and format checks alone do
   not establish intelligibility.
 - Capture three washer and three dryer cycles, freeze detector parameters, and
   validate independent captures. Validate the monitoring lease on the physical
@@ -27,7 +28,7 @@ Remaining acceptance and release work:
   artifacts; current cloud deployment is dev. Do not point production at dev.
 - Complete failure-alarm injection and remaining operational metrics, cost
   visibility, certificate renewal, and production release/rollback exercises.
-- Review the documented base-image security findings before production approval.
+- Require a completed image scan with zero vulnerability findings before release.
 - Merge the validated release candidate, obtain one recorded production approval
   after manual dev smoke, deploy, observe real loads, then retire Gotify.
 
@@ -42,6 +43,8 @@ monitoring and delivery failures visible. Replace Gotify as the primary alert.
   request during calls. Goofy wording is welcome, but the meaning must stay clear.
 - Use one dedicated originating number for laundry and future personal projects.
 - Call at any hour. Retry once after a confirmed failed or unanswered call.
+- Never leave a voicemail message. Wait silently for the owner to press 1 before
+  playback; disconnect silently after eight seconds without valid input.
 - Keep automatic load detection with manual Start load and Cancel controls.
 - Favor reliable monitoring over battery savings.
 - Show operational failures in dashboards; do not add email or operational calls.
@@ -133,8 +136,10 @@ selection and separate validation.
 - Use a stable Connect `ClientToken` per attempt. Transport retries reuse it;
   a deliberate second call gets a new attempt ID and token.
 - Reconcile unknown outcomes; never convert missing events into a fresh call.
-- Treat voicemail as answered. Show playback completion separately from human
-  acknowledgment; keypad acknowledgment is not part of this version.
+- Require an explicit human keypress before any outbound audio. Do not rely on
+  probabilistic answering-machine detection. Missing/invalid input or an input
+  error disconnects silently and permits the same bounded retry as no-answer.
+  Show playback completion separately from merely answering the phone.
 
 Verify Connect-specific availability, quotas, destination permissions, and number
 inventory before provisioning. The earlier End User Messaging sandbox and $1 limit
@@ -148,8 +153,8 @@ switch. Budget warnings are not a guaranteed hard billing cutoff.
 
 Confirm the actual recipient securely during setup. Test answering, voicemail,
 no-answer, carrier spam filtering, and Do Not Disturb on the real phone. Add the
-originating number to contacts. Validate voicemail timing rather than assuming
-an answered call means the recording was heard.
+originating number to contacts. Answer and press 1 within eight seconds to hear
+the recording. Confirm that unanswered calls play no prompts or messages.
 
 ## 2. Reliable detection and durable delivery
 
@@ -265,7 +270,8 @@ including gentle washing, with no premature or missed completions. Target a
 decision within ten minutes of the observed final stop. Concurrent appliances are
 stack monitoring, not guaranteed individual-appliance completion.
 
-Verify real answered and voicemail playback, at most one unanswered-call retry,
+Verify real human-confirmed playback and silent voicemail handling, at most one
+unanswered-call retry,
 accurate failure displays, and rollback without historical notification replay.
 Test all ten recordings over the playback path without making ten unsolicited
 calls. Completion means real laundry produces an intelligible phone call—not

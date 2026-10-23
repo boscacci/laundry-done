@@ -14,6 +14,7 @@ export RELAY_IMAGE
 RELAY_IMAGE="$(conda run --no-capture-output -n "${LAUNDRY_CONDA_ENV:-dell}" python -c 'import json,os;from pathlib import Path;c=os.environ["RELEASE_COMMIT"];d=json.loads(Path("outputs/releases",c+".json").read_text());a=json.loads(Path(os.environ["APPROVAL_RECORD"]).read_text());assert a["tag"]==os.environ["RELEASE_TAG"] and a["image"]==d["image"] and a["environment"]=="production" and a["manual_dev_smoke_passed"] is True and a["approved_by"] and a["approved_at"] and a["approval_url"];assert d["smoke"]=="passed";print(d["image"])')"
 [[ "$(git rev-parse HEAD)" == "$commit" ]] || { echo 'Checkout exact tagged commit first' >&2; exit 1; }
 # No build: promotion always reuses the dev-tested digest.
+conda run --no-capture-output -n "${LAUNDRY_CONDA_ENV:-dell}" python scripts/check-image-security.py --tag "git-$commit" --expected-digest "${RELAY_IMAGE##*@}" --record "outputs/releases/$commit.security.json"
 docker compose -f compose.yaml -f compose.release.yaml up -d --no-build --wait relay voice-worker
 curl --fail --silent http://127.0.0.1:8088/healthz >/dev/null
 printf 'Promoted %s at %s\n' "$tag" "$commit"

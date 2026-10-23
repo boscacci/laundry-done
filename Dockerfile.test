@@ -27,6 +27,7 @@ COPY --chown=tester:tester server/tests ./server/tests
 COPY --chown=tester:tester tests ./tests
 COPY --chown=tester:tester scripts ./scripts
 COPY --chown=tester:tester services/phone_alerts ./services/phone_alerts
+COPY --chown=tester:tester infra/phone-alerts/outbound-flow.json.tftpl ./infra/phone-alerts/outbound-flow.json.tftpl
 
 USER tester
 

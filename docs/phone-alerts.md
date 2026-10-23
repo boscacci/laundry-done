@@ -57,7 +57,14 @@ idempotent; manual Start does not fabricate eight minutes of activity evidence.
 An AWS timeout retries the same job and Connect client token. Unknown outcomes do
 not create a second attempt. Only confirmed no-answer/retryable failure may queue
 one second call after two minutes. Duplicate or late provider events must not
-regress a completed job. Playback does not prove a human heard it.
+regress a completed job. Playback requires pressing 1 within eight seconds after answering. Before that
+keypress, the call is silent: no instruction prompt, greeting, or laundry audio.
+Missing or invalid input and input errors disconnect silently and are handled as
+no-answer, with at most one retry. Never play a voicemail message.
+
+The caller does not control whether a carrier creates an empty voicemail entry
+for a silent connection. It never sends audio without the keypress. Probabilistic
+answering-machine detection is not used as proof of a human answer.
 
 Inspect CloudWatch Lambda errors and job state independently when the local
 service is unavailable. The owner selected dashboard-only operational reporting;
@@ -87,20 +94,19 @@ Historical done_sent events retain unverified delivery status and are not replay
 Retire Gotify only after real phone and load acceptance, preserving its data and
 all unrelated shared front-door routes.
 
-## Runtime image security review (October 22, 2026)
+## Runtime image security
 
-The current pinned Bookworm base has seven HIGH, two MEDIUM, and two LOW ECR
-findings, with no CRITICAL findings. The HIGH findings concern util-linux and
-zlib. Debian's available Bookworm packages have no fixes for these findings at
-this review; switching to the inspected Trixie base does not resolve them.
-Python runtime dependency auditing reports no known vulnerabilities.
+The previous Bookworm runtime had seven HIGH, two MEDIUM, and two LOW ECR
+findings. It is replaced with a digest-pinned Python 3.13 Alpine 3.24 image,
+including patched zlib 1.3.2-r1 and no mount/nsenter utilities. The official AWS
+signing helper runs with Alpine's gcompat library; verify real Roles Anywhere
+credentials after runtime changes.
+
+The release scripts require a completed ECR scan of the exact runtime manifest
+with zero findings at every severity. Failed, missing, incomplete, or ambiguous
+scans block deployment. The scan record binds the image index and runtime digest;
+there are no ignored CVEs or severity exceptions. Re-scan on promotion as well.
 
 The image runs as UID 10001, strips setuid/setgid file bits, and dev/release
 services drop all capabilities, prohibit privilege escalation, and use read-only
-root filesystems. These controls reduce exposure; they do not establish that all
-findings are inapplicable. Track fixed base digests and rebuild/retest when
-available. Production approval must explicitly address these unresolved findings.
-
-Primary advisories:
-[util-linux](https://security-tracker.debian.org/tracker/CVE-2026-76642) and
-[zlib](https://security-tracker.debian.org/tracker/CVE-2026-85091).
+root filesystems. Python runtime dependency auditing is a separate required check.

@@ -114,3 +114,40 @@ def test_duplicate_final_no_answer_event_cannot_postpone_retry(service):
     d.clock = lambda: 1121
     d.tick()
     assert len(c) == 2
+
+
+def test_silent_keypress_timeout_callback_retries_once_without_late_event_regression(
+    service, monkeypatch
+):
+    import handler as cloud
+
+    d, store, calls = service
+    job = d.create("laundry", "silent-test", "owner", "test", "ROLE1")
+    monkeypatch.setattr(cloud, "engine", lambda: d)
+    monkeypatch.setenv("INSTANCE_ID", "instance")
+
+    def callback(contact):
+        return cloud.handler(
+            {
+                "Details": {
+                    "ContactData": {
+                        "InstanceARN": "arn:aws:connect:us-west-2:123:instance/instance",
+                        "ContactId": contact,
+                        "Attributes": {"job_id": job["id"]},
+                    },
+                    "Parameters": {"outcome": "no_answer"},
+                }
+            },
+            None,
+        )
+
+    assert callback("contact-1") == {"ok": "true"}
+    d.outcome(job["id"], "contact-1", "unknown")
+    d.clock = lambda: 1121
+    d.tick()
+    assert len(calls) == 2
+    callback("contact-2")
+    d.clock = lambda: 1400
+    d.tick()
+    assert len(calls) == 2
+    assert store.get(job["id"])["status"] == "failed"

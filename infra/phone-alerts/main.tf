@@ -335,10 +335,6 @@ resource "aws_lambda_function" "dispatcher" {
 locals {
 
   lambda_arn = "arn:aws:lambda:us-west-2:${data.aws_caller_identity.current.account_id}:function:${local.name}"
-  errors = [{
-    NextAction = "failed", ErrorType = "NoMatchingError"
-    }
-  ]
 
 }
 
@@ -360,63 +356,7 @@ resource "aws_connect_contact_flow" "outbound" {
   instance_id = aws_connect_instance.shared.id
   name        = "Shared prerecorded alerts"
   type        = "CONTACT_FLOW"
-  content = jsonencode({
-    Version = "2019-10-30", StartAction = "play", Actions = [
-      {
-        Identifier = "play", Type = "MessageParticipant", Parameters = {
-          Media = {
-            Uri = "$.Attributes.audio_uri", SourceType = "S3", MediaType = "Audio"
-          }
-
-          }, Transitions = {
-          NextAction = "completed", Errors = local.errors
-        }
-
-      },
-      {
-        Identifier = "completed", Type = "InvokeLambdaFunction", Parameters = {
-          LambdaFunctionARN = local.lambda_arn, InvocationTimeLimitSeconds = "8", InvocationType = "SYNCHRONOUS", LambdaInvocationAttributes = {
-            outcome = "completed"
-            }, ResponseValidation = {
-            ResponseType = "STRING_MAP"
-          }
-
-          }, Transitions = {
-          NextAction = "hangup", Errors = [{
-            NextAction = "hangup", ErrorType = "NoMatchingError"
-            }
-          ]
-        }
-
-      },
-      {
-        Identifier = "failed", Type = "InvokeLambdaFunction", Parameters = {
-          LambdaFunctionARN = local.lambda_arn, InvocationTimeLimitSeconds = "8", InvocationType = "SYNCHRONOUS", LambdaInvocationAttributes = {
-            outcome = "failed"
-            }, ResponseValidation = {
-            ResponseType = "STRING_MAP"
-          }
-
-          }, Transitions = {
-          NextAction = "hangup", Errors = [{
-            NextAction = "hangup", ErrorType = "NoMatchingError"
-            }
-          ]
-        }
-
-      },
-      {
-        Identifier = "hangup", Type = "DisconnectParticipant", Parameters = {
-
-          }, Transitions = {
-
-        }
-
-      }
-
-    ]
-    }
-  )
+  content     = templatefile("${path.module}/outbound-flow.json.tftpl", { lambda_arn = local.lambda_arn })
 
 }
 
