@@ -1364,6 +1364,7 @@ def _monitor_html() -> str:
         <p id="load-state" role="status">Loading monitoring status…</p>
         <p id="load-evidence" class="small"></p>
         <p id="voice-status" class="small"></p>
+        <p class="small" id="call-instructions">Answer and press 1 within eight seconds to hear your alert. Calls end silently without a keypress.</p>
         <div style="display:flex;flex-wrap:wrap;gap:8px">
           <button data-action="start">Start load</button>
           <button data-action="cancel" class="secondary">Cancel load</button>
@@ -1467,7 +1468,7 @@ def _monitor_html() -> str:
     }
     document.querySelectorAll('[data-action]').forEach(button => button.addEventListener('click', async () => {
       const action = button.dataset.action;
-      if (action === 'test' && !confirm('Place a test call to your configured cell phone now?')) return;
+      if (action === 'test' && !confirm('Place a test call now? Answer and press 1 within eight seconds to hear it. Without a keypress the call ends silently and may retry once.')) return;
       button.disabled = true;
       try {
         const response = await fetch('/api/v1/control', {method:'POST',headers:{'Content-Type':'application/json','Idempotency-Key':crypto.randomUUID()},body:JSON.stringify({action})});

@@ -13,6 +13,7 @@ const assert=require('node:assert/strict');
     assert.equal(response.status(),200);
     await page.waitForFunction(()=>document.querySelector('#load-state').textContent!=='Loading monitoring status…');
     assert(!/unavailable|HTTP/.test(await page.locator('#load-state').innerText()));
+    assert((await page.locator('#call-instructions').innerText()).includes('press 1 within eight seconds'));
     await page.locator('[data-action="start"]').click();
     await page.getByText('start: accepted',{exact:true}).waitFor();
     await page.locator('[data-action="pause"]').click();

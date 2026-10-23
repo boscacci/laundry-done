@@ -21,7 +21,8 @@ def execute_flow(digit=None, input_error=None):
             return audio, callbacks
         if a["Type"] == "GetParticipantInput":
             # Even an instructional prompt can become a voicemail message.
-            assert not ({"Text", "SSML", "PromptId", "Media"} & p.keys())
+            assert not ({"Text", "PromptId", "Media"} & p.keys())
+            assert p.get("SSML") == '<speak><break time="100ms"/></speak>'
             assert 1 <= int(p["InputTimeLimitSeconds"]) <= 10
             condition = next(
                 (
