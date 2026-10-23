@@ -204,3 +204,10 @@ and any hot or moving parts.
 - [Espressif Arduino ESP32 sleep API](https://docs.espressif.com/projects/arduino-esp32/en/latest/api/deepsleep.html)
 - [Gotify install docs](https://gotify.net/docs/install)
 - [Gotify push message API](https://gotify.net/docs/pushmsg)
+
+## Phone alert development
+
+The replacement phone alert service uses a shared Amazon Connect number and
+prerecorded clips. [Implementation plan](PLAN.md) and
+[development/release runbook](docs/phone-alerts.md) describe its rollout, durable
+outbox, simulated dev environment, and real-phone acceptance requirements.

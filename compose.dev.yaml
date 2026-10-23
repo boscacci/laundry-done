@@ -1,0 +1,37 @@
+name: laundry-done-dev
+services:
+  relay:
+    image: ${RELAY_IMAGE:?Set immutable RELAY_IMAGE}
+    restart: unless-stopped
+    env_file: ./outputs/dev.env
+    environment:
+      DATABASE_PATH: /data/events.sqlite3
+      ALERT_BACKEND: simulation
+      AUDIO_DIRECTORY: /audio
+    ports:
+      - "127.0.0.1:18088:8080"
+    volumes:
+      - ./data/dev:/data
+      - ./outputs/audio/v1:/audio:ro
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    read_only: true
+    tmpfs: [/tmp]
+  worker:
+    image: ${RELAY_IMAGE:?Set immutable RELAY_IMAGE}
+    restart: unless-stopped
+    command: [python, -m, laundry_done_relay.voice_worker]
+    environment:
+      DATABASE_PATH: /data/events.sqlite3
+      ALERT_BACKEND: simulation
+    volumes:
+      - ./data/dev:/data
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    read_only: true
+    tmpfs: [/tmp]
+    healthcheck:
+      test: [CMD, python, -c, "import sqlite3,time; c=sqlite3.connect('file:/data/events.sqlite3?mode=ro',uri=True); row=c.execute('select at from worker_health where id=1').fetchone(); assert row and time.time()-row[0]<75"]
+      interval: 20s
+      timeout: 3s
+      retries: 3

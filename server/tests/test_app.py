@@ -860,7 +860,8 @@ def test_remote_monitor_request_still_requires_admin_secret():
     assert _has_admin_access("test-secret", "test-secret", request)
 
 
-def test_tailscale_identity_can_list_calibration_without_device_secret():
+def test_tailscale_identity_can_list_calibration_without_device_secret(monkeypatch):
+    monkeypatch.setenv("TRUSTED_PROXY_IPS", "172.20.0.1")
     request = SimpleNamespace(
         client=SimpleNamespace(host="172.20.0.1"),
         headers={"tailscale-user-login": "user@example.com"},

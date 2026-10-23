@@ -711,8 +711,34 @@ void test_wireless_updates_require_settled_idle_state() {
   }
 }
 
+void test_active_cycle_keeps_radio_awake_until_idle_or_done() {
+  for (DetectorState state : {DetectorState::MotionConfirming, DetectorState::CycleRunning,
+                             DetectorState::QuietCandidate}) {
+    TEST_ASSERT_TRUE(active_cycle_requires_continuous_power(state));
+  }
+  TEST_ASSERT_FALSE(active_cycle_requires_continuous_power(DetectorState::Idle));
+  TEST_ASSERT_FALSE(active_cycle_requires_continuous_power(DetectorState::DoneSent));
+}
+
+void test_monitoring_lease_survives_quiet_and_expires_at_bound() {
+  MonitoringLease lease;
+  TEST_ASSERT_FALSE(lease.active(100));
+  TEST_ASSERT_TRUE(lease.apply(100, 14400));
+  TEST_ASSERT_TRUE(lease.active(300100));
+  TEST_ASSERT_FALSE(lease.active(14400100));
+  TEST_ASSERT_FALSE(lease.apply(200, 14401));
+  TEST_ASSERT_TRUE(lease.apply(500, 100));
+  TEST_ASSERT_TRUE(lease.apply(600, 0));
+  TEST_ASSERT_FALSE(lease.active(601));
+  TEST_ASSERT_TRUE(lease.apply(0xFFFFFF00UL, 1));
+  TEST_ASSERT_TRUE(lease.active(0x00000010UL));
+  TEST_ASSERT_FALSE(lease.active(0x00000400UL));
+}
+
 int main() {
   UNITY_BEGIN();
+  RUN_TEST(test_monitoring_lease_survives_quiet_and_expires_at_bound);
+  RUN_TEST(test_active_cycle_keeps_radio_awake_until_idle_or_done);
   RUN_TEST(test_mounted_off_capture_never_confirms_motion);
   RUN_TEST(test_cadence_keeps_power_for_restarted_server_quiet_countdown);
   RUN_TEST(test_entire_measured_dryer_capture_stays_running);

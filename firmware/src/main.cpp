@@ -115,6 +115,8 @@ uint32_t sample_post_failures = 0;
 int previous_sample_http_status = 0;
 int last_light_sleep_result = -1;
 LaundryDetector telemetry_cadence_detector(kTelemetryDetectorConfig);
+MonitoringLease monitoring_lease;
+
 
 enum class MotionSensor {
   None,
@@ -420,7 +422,8 @@ bool battery_keep_awake_active() {
 }
 
 void maybe_sleep_wifi() {
-  if (LAUNDRY_KEEP_WIFI_CONNECTED || battery_keep_awake_active()) {
+  if (LAUNDRY_KEEP_WIFI_CONNECTED || battery_keep_awake_active() ||
+      (monitoring_lease.active(millis()) || active_cycle_requires_continuous_power(telemetry_cadence_detector.state()))) {
     return;
   }
   WiFi.disconnect(true);
@@ -464,6 +467,11 @@ void power_bank_keepalive_pulse(unsigned long duration_ms, unsigned long remaini
 }
 
 void maybe_active_cycle_load_pulse(DetectorState state, unsigned long *nap_ms) {
+  // Active-cycle recovery mode keeps the radio on continuously. A load pulse
+  // would disconnect it again at the end and defeat that power floor.
+  if (active_cycle_requires_continuous_power(state)) {
+    return;
+  }
   // During startup the radio remains connected between packets already.
   if (battery_keep_awake_active()) {
     return;
@@ -494,8 +502,8 @@ void nap(unsigned long nap_ms, DetectorState state) {
   if (nap_ms == 0) {
     return;
   }
-  if (battery_keep_awake_active()) {
-    Serial.printf("sleep mode=startup_awake duration_ms=%lu\n", nap_ms);
+  if (battery_keep_awake_active() || active_cycle_requires_continuous_power(state)) {
+    Serial.printf("sleep mode=continuous_awake duration_ms=%lu\n", nap_ms);
     delay(nap_ms);
     return;
   }
@@ -673,6 +681,8 @@ bool post_calibration_sample_event(uint32_t event_counter,
   diagnostics["version"] = 1;
   diagnostics["reset_reason"] = static_cast<int>(esp_reset_reason());
   diagnostics["detector_state"] = detector_state_to_string(telemetry_cadence_detector.state());
+  diagnostics["active_continuous_power"] =
+      (monitoring_lease.active(millis()) || active_cycle_requires_continuous_power(telemetry_cadence_detector.state()));
   diagnostics["startup_keep_awake"] = battery_keep_awake_active();
   diagnostics["startup_settling"] = window.at_ms < kTelemetryCadence.startup_settle_ms;
   diagnostics["light_sleep_enabled"] = LAUNDRY_USE_LIGHT_SLEEP != 0;
@@ -685,6 +695,7 @@ bool post_calibration_sample_event(uint32_t event_counter,
   diagnostics["previous_sample_http_status"] = previous_sample_http_status;
   diagnostics["free_heap_bytes"] = ESP.getFreeHeap();
   diagnostics["min_free_heap_bytes"] = ESP.getMinFreeHeap();
+  diagnostics["monitoring_lease_active"] = monitoring_lease.active(millis());
   laundry_ota::diagnostics(diagnostics);
   const String device_time = format_utc(sample_epoch_seconds);
   if (device_time.length() > 0) {
@@ -720,8 +731,24 @@ bool post_calibration_sample_event(uint32_t event_counter,
   if (!response_body.isEmpty()) {
     JsonDocument response;
     if (!deserializeJson(response, response_body)) {
+      JsonObject command = response["monitoring"].as<JsonObject>();
+      if (!command.isNull()) {
+        const String payload = command["payload"].as<String>();
+        const String signature = command["signature"].as<String>();
+        JsonDocument lease;
+        if (signature == hmac_sha256(String("monitoring-v1\n") + payload) &&
+            !deserializeJson(lease, payload) && lease["version"].as<int>() == 1 &&
+            lease["event_id"].as<String>() == event_id &&
+            lease["session_id"].as<String>() == run_id && lease["lease_seconds"].is<unsigned long>()) {
+          const bool was_active = monitoring_lease.active(millis());
+          const unsigned long seconds = lease["lease_seconds"].as<unsigned long>();
+          if (monitoring_lease.apply(millis(), seconds) && was_active && seconds == 0) {
+            telemetry_cadence_detector.reset();
+          }
+        }
+      }
       laundry_ota::handle_offer(response["ota"], event_id,
-          wireless_update_allowed(millis(), telemetry_cadence_detector.state(), kTelemetryCadence),
+          !monitoring_lease.active(millis()) && wireless_update_allowed(millis(), telemetry_cadence_detector.state(), kTelemetryCadence),
           millis() >= kTelemetryCadence.startup_settle_ms,
           RELAY_URL, DEVICE_ID, DEVICE_SECRET);
     }
@@ -1237,9 +1264,10 @@ void loop() {
       sample_epoch_seconds);
   Serial.printf("telemetry_result ok=%s\n", telemetry_ok ? "true" : "false");
 
+  const DetectorState power_state = monitoring_lease.active(millis()) ? DetectorState::CycleRunning : telemetry_cadence_detector.state();
   const unsigned long target_interval_ms = telemetry_poll_ms(
       millis(),
-      cadence_decision.state,
+      power_state,
       kTelemetryCadence);
   unsigned long nap_ms = nap_duration_ms(sample_started_ms, millis(), target_interval_ms);
   const time_t now_epoch_seconds = time(nullptr);
@@ -1254,9 +1282,9 @@ void loop() {
                 nap_ms,
                 wall_clock_aligned ? "true" : "false",
                 battery_keep_awake_active() ? "true" : "false",
-                battery_keepalive_allowed(millis(), cadence_decision.state, kTelemetryCadence) ? "true" : "false");
-  maybe_active_cycle_load_pulse(cadence_decision.state, &nap_ms);
-  nap(nap_ms, cadence_decision.state);
+                battery_keepalive_allowed(millis(), power_state, kTelemetryCadence) ? "true" : "false");
+  maybe_active_cycle_load_pulse(power_state, &nap_ms);
+  nap(nap_ms, power_state);
 }
 
 #endif

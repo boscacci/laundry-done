@@ -8,6 +8,7 @@ __pycache__
 *.py[cod]
 data
 outputs
+firmware/include/laundry_config.h
 .terraform
 *.tfstate
 *.tfstate.*

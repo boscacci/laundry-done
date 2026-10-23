@@ -185,6 +185,8 @@ BatteryKeepaliveNap next_battery_keepalive_nap(unsigned long remaining_nap_ms,
 
 bool should_post_done_event(const Decision &decision);
 
+bool active_cycle_requires_continuous_power(DetectorState state);
+
 unsigned long active_cycle_load_pulse_ms(unsigned long now_ms,
                                          DetectorState state,
                                          unsigned long last_pulse_ms,
@@ -196,3 +198,21 @@ unsigned long nap_duration_ms(unsigned long sample_started_ms,
 
 unsigned long aligned_wall_clock_nap_ms(long epoch_seconds,
                                         unsigned long target_interval_ms);
+
+// Bounded server-authorized keep-awake lease. The transport verifies the HMAC
+// and binds the command to the current packet/session before applying it.
+class MonitoringLease {
+public:
+  bool apply(uint32_t now, uint32_t seconds) {
+    if (seconds > 14400U) return false;
+    started_ = now;
+    duration_ = seconds * 1000U;
+    return true;
+  }
+  bool active(uint32_t now) const {
+    return duration_ > 0 && static_cast<uint32_t>(now - started_) < duration_;
+  }
+private:
+  uint32_t started_ = 0;
+  uint32_t duration_ = 0;
+};

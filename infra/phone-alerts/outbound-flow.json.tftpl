@@ -1,0 +1,141 @@
+{
+  "Version": "2019-10-30",
+  "StartAction": "human",
+  "Actions": [
+    {
+      "Identifier": "human",
+      "Type": "GetParticipantInput",
+      "Parameters": {
+        "StoreInput": "False",
+        "SSML": "<speak><break time=\"100ms\"/></speak>",
+        "InputTimeLimitSeconds": "8"
+      },
+      "Transitions": {
+        "NextAction": "unconfirmed",
+        "Conditions": [
+          {
+            "NextAction": "play",
+            "Condition": {
+              "Operator": "Equals",
+              "Operands": [
+                "1"
+              ]
+            }
+          }
+        ],
+        "Errors": [
+          {
+            "NextAction": "unconfirmed",
+            "ErrorType": "NoMatchingCondition"
+          },
+          {
+            "NextAction": "unconfirmed",
+            "ErrorType": "InputTimeLimitExceeded"
+          },
+          {
+            "NextAction": "unconfirmed",
+            "ErrorType": "NoMatchingError"
+          }
+        ]
+      }
+    },
+    {
+      "Identifier": "play",
+      "Type": "MessageParticipant",
+      "Parameters": {
+        "Media": {
+          "Uri": "$.Attributes.audio_uri",
+          "SourceType": "S3",
+          "MediaType": "Audio"
+        }
+      },
+      "Transitions": {
+        "NextAction": "completed",
+        "Errors": [
+          {
+            "NextAction": "failed",
+            "ErrorType": "NoMatchingError"
+          }
+        ]
+      }
+    },
+    {
+      "Identifier": "completed",
+      "Type": "InvokeLambdaFunction",
+      "Parameters": {
+        "LambdaFunctionARN": "${lambda_arn}",
+        "InvocationTimeLimitSeconds": "8",
+        "InvocationType": "SYNCHRONOUS",
+        "LambdaInvocationAttributes": {
+          "outcome": "completed"
+        },
+        "ResponseValidation": {
+          "ResponseType": "STRING_MAP"
+        }
+      },
+      "Transitions": {
+        "NextAction": "hangup",
+        "Errors": [
+          {
+            "NextAction": "hangup",
+            "ErrorType": "NoMatchingError"
+          }
+        ]
+      }
+    },
+    {
+      "Identifier": "unconfirmed",
+      "Type": "InvokeLambdaFunction",
+      "Parameters": {
+        "LambdaFunctionARN": "${lambda_arn}",
+        "InvocationTimeLimitSeconds": "8",
+        "InvocationType": "SYNCHRONOUS",
+        "LambdaInvocationAttributes": {
+          "outcome": "no_answer"
+        },
+        "ResponseValidation": {
+          "ResponseType": "STRING_MAP"
+        }
+      },
+      "Transitions": {
+        "NextAction": "hangup",
+        "Errors": [
+          {
+            "NextAction": "hangup",
+            "ErrorType": "NoMatchingError"
+          }
+        ]
+      }
+    },
+    {
+      "Identifier": "failed",
+      "Type": "InvokeLambdaFunction",
+      "Parameters": {
+        "LambdaFunctionARN": "${lambda_arn}",
+        "InvocationTimeLimitSeconds": "8",
+        "InvocationType": "SYNCHRONOUS",
+        "LambdaInvocationAttributes": {
+          "outcome": "failed"
+        },
+        "ResponseValidation": {
+          "ResponseType": "STRING_MAP"
+        }
+      },
+      "Transitions": {
+        "NextAction": "hangup",
+        "Errors": [
+          {
+            "NextAction": "hangup",
+            "ErrorType": "NoMatchingError"
+          }
+        ]
+      }
+    },
+    {
+      "Identifier": "hangup",
+      "Type": "DisconnectParticipant",
+      "Parameters": {},
+      "Transitions": {}
+    }
+  ]
+}

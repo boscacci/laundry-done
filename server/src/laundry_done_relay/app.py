@@ -13,10 +13,11 @@ from typing import Callable
 
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
 from pydantic import BaseModel, Field, ValidationError
 
 from laundry_done_relay.ota import install_ota_routes, offer_update
+from laundry_done_relay import delivery
 
 
 class LaundryEvent(BaseModel):
@@ -56,18 +57,26 @@ def create_app(
     *,
     database_path: str | Path,
     device_secret: str,
-    gotify_url: str,
-    gotify_app_token: str,
+    gotify_url: str = "",
+    gotify_app_token: str = "",
+    alert_backend: str = "gotify",
     monitor_tailscale_users: set[str] | None = None,
     monitor_tailscale_ips: set[str] | None = None,
     push_message: PushMessage | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Laundry Done Relay")
     db_path = Path(database_path)
-    sender = push_message or _gotify_sender(gotify_url, gotify_app_token)
+    if alert_backend not in {"gotify", "voice", "simulation"}:
+        raise ValueError("invalid alert backend")
+    sender = push_message or (
+        _gotify_sender(gotify_url, gotify_app_token)
+        if alert_backend == "gotify"
+        else lambda message: None
+    )
     monitor_users = monitor_tailscale_users or set()
     monitor_ips = monitor_tailscale_ips or set()
     _init_db(db_path)
+    delivery.init_db(db_path)
     install_ota_routes(app, db_path, device_secret)
 
     @app.get("/healthz")
@@ -105,15 +114,76 @@ def create_app(
             and not already_notified
             and event.state in {"done_sent", "button_pressed", "motion_started"}
         ):
-            sender(_message_for(event).model_dump())
+            try:
+                sender(_message_for(event).model_dump())
+            except httpx.HTTPError:
+                pass  # Completion remains durable in the outbox.
         if not duplicate and event.state == "calibration_sample":
+            raw = json.loads(body)
+            delivery.observe(
+                db_path, raw, _classify_server_event(raw)["short"] == "active"
+            )
             _maybe_send_server_done(db_path, event, sender)
 
         response = {"accepted": True, "duplicate": duplicate}
         offer = offer_update(db_path, device_secret, json.loads(body))
         if offer:
             response["ota"] = offer
+        if event.state == "calibration_sample":
+            response["monitoring"] = _monitoring_command(
+                db_path, device_secret, json.loads(body)
+            )
         return response
+
+    @app.get("/api/v1/status")
+    def operational_status(
+        request: Request, x_laundry_admin_secret: str = Header(default="")
+    ):
+        require_admin(request, x_laundry_admin_secret)
+        device_id = os.environ.get("MONITOR_DEVICE_ID", "laundry-stack-1")
+        result = delivery.status(db_path, device_id)
+        result.update(_observation_status(db_path, device_id))
+        result["backend"] = alert_backend
+        return result
+
+    def require_admin(request, secret):
+        if not _has_admin_access(
+            device_secret,
+            secret,
+            request,
+            monitor_tailscale_users=monitor_users,
+            monitor_tailscale_ips=monitor_ips,
+        ):
+            raise HTTPException(status_code=401, detail="admin access required")
+
+    @app.post("/api/v1/control")
+    async def operate(
+        request: Request,
+        x_laundry_admin_secret: str = Header(default=""),
+        idempotency_key: str = Header(default=""),
+    ):
+        require_admin(request, x_laundry_admin_secret)
+        origin = request.headers.get("origin")
+        expected_origins = {
+            str(request.base_url).rstrip("/"),
+            "https://" + request.headers.get("host", ""),
+        }
+        if origin and origin not in expected_origins:
+            raise HTTPException(status_code=403, detail="origin denied")
+        if not 1 <= len(idempotency_key) <= 128:
+            raise HTTPException(status_code=422, detail="Idempotency-Key required")
+        try:
+            payload = await request.json()
+            if not isinstance(payload, dict) or set(payload) != {"action"}:
+                raise ValueError("only action is accepted")
+            return delivery.control(
+                db_path,
+                payload["action"],
+                os.environ.get("MONITOR_DEVICE_ID", "laundry-stack-1"),
+                idempotency_key,
+            )
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @app.get("/api/v1/calibration/events")
     def list_calibration_events(
@@ -138,6 +208,26 @@ def create_app(
             "notifications": _list_notification_events(db_path, days),
         }
 
+    @app.get("/api/v1/audio/{message_key}")
+    def audio_preview(
+        message_key: str,
+        request: Request,
+        x_laundry_admin_secret: str = Header(default=""),
+    ):
+        require_admin(request, x_laundry_admin_secret)
+        if message_key not in {f"laundry-{i:02}" for i in range(1, 11)}:
+            raise HTTPException(status_code=404, detail="unknown recording")
+        path = Path(os.environ.get("AUDIO_DIRECTORY", "/audio")) / (
+            message_key + ".wav"
+        )
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail="recording not published")
+        return FileResponse(
+            path,
+            media_type="audio/wav",
+            headers={"Cache-Control": "private, max-age=3600"},
+        )
+
     return app
 
 
@@ -145,8 +235,9 @@ def app_from_env() -> FastAPI:
     return create_app(
         database_path=os.environ.get("DATABASE_PATH", "/data/events.sqlite3"),
         device_secret=_required_env("DEVICE_SECRET"),
-        gotify_url=_required_env("GOTIFY_URL"),
-        gotify_app_token=_required_env("GOTIFY_APP_TOKEN"),
+        gotify_url=os.environ.get("GOTIFY_URL", ""),
+        gotify_app_token=os.environ.get("GOTIFY_APP_TOKEN", ""),
+        alert_backend=os.environ.get("ALERT_BACKEND", "gotify"),
         monitor_tailscale_users=_csv_env("MONITOR_TAILSCALE_USERS"),
         monitor_tailscale_ips=_csv_env("MONITOR_TAILSCALE_IPS"),
     )
@@ -173,11 +264,18 @@ def _has_admin_access(
 ) -> bool:
     if hmac.compare_digest(secret, received):
         return True
-    tailscale_login = request.headers.get("tailscale-user-login", "").strip().lower()
+    # Uvicorn proxy-header rewriting is disabled at runtime. Only explicitly
+    # trusted reverse proxies may attest identity or forwarding headers.
+    peer = request.client.host if request.client else ""
+    trusted = _csv_env("TRUSTED_PROXY_IPS") | {"127.0.0.1", "::1"}
+    proxy = _client_ip_allowed(peer, trusted)
+    tailscale_login = (
+        request.headers.get("tailscale-user-login", "").strip().lower() if proxy else ""
+    )
     allowed_users = monitor_tailscale_users or set()
     if tailscale_login and ("*" in allowed_users or tailscale_login in allowed_users):
         return True
-    forwarded_for = _forwarded_client_ip(request)
+    forwarded_for = _forwarded_client_ip(request) if proxy else ""
     client = request.client
     if client is None:
         return False
@@ -261,9 +359,11 @@ def _store_event(path: Path, event: LaundryEvent, raw_body: bytes) -> bool:
                     raw_body.decode("utf-8"),
                 ),
             )
-            return False
         except sqlite3.IntegrityError:
             return True
+        if event.state == "done_sent":
+            delivery.enqueue_completion(conn, event, json.loads(raw_body))
+        return False
 
 
 def _done_sent_for_cycle_exists(path: Path, event: LaundryEvent) -> bool:
@@ -329,9 +429,23 @@ def _list_calibration_events(
 def _maybe_send_server_done(
     path: Path, event: LaundryEvent, sender: PushMessage
 ) -> None:
+    session = delivery.status(path, event.device_id)["session"]
+    if (
+        session
+        and session["status"] in {"canceled", "expired"}
+        and session["boot_id"] in (None, event.cycle_id)
+    ):
+        return
     samples = _current_observation_segment(
         _calibration_events_for_device(path, event.device_id)
     )
+    if session and session["manual"]:
+        samples = [
+            s
+            for s in samples
+            if _received_timestamp(s)
+            and _received_timestamp(s).timestamp() >= session["started_at"]
+        ]
     if len(samples) < SERVER_CLASSIFIER_SMOOTHING_SAMPLES:
         return
     # Delayed/backfilled readings must not trigger a notification about newer data.
@@ -403,9 +517,98 @@ def _maybe_send_server_done(
         last_motion_ms=SERVER_DONE_QUIET_SECONDS * 1000,
         firmware_version="server-classifier",
     )
-    raw_body = notification.model_dump_json().encode("utf-8")
+    payload = notification.model_dump()
+    payload["_episode_id"] = "observed:" + samples[active_indexes[0]]["event_id"]
+    raw_body = json.dumps(payload).encode("utf-8")
     if not _store_event(path, notification, raw_body):
-        sender(_message_for(notification).model_dump())
+        try:
+            sender(_message_for(notification).model_dump())
+        except httpx.HTTPError:
+            pass  # A provider outage cannot erase the queued completion.
+
+
+def _observation_status(path, device_id):
+    samples = _current_observation_segment(
+        _calibration_events_for_device(path, device_id)
+    )
+    if not samples:
+        return {
+            "evidence": {"state": "Waiting", "active_seconds": 0, "quiet_seconds": 0}
+        }
+    phases = _server_base_phases(samples)
+    latest = samples[-1]
+    last_done = _latest_notification_received_at(path, device_id)
+    indexes = [
+        i
+        for i, p in enumerate(phases)
+        if p["short"] == "active"
+        and (
+            last_done is None
+            or (_received_timestamp(samples[i]) or last_done) > last_done
+        )
+    ]
+    active = sum(
+        (_event_timestamp(samples[b]) - _event_timestamp(samples[a])).total_seconds()
+        for a, b in zip(indexes, indexes[1:])
+        if b == a + 1
+    )
+    raw = [_classify_server_event(s)["short"] for s in samples]
+    q = len(raw) - 1
+    while q > 0 and raw[q - 1] == "quiet":
+        q -= 1
+    quiet = (
+        (_event_timestamp(latest) - _event_timestamp(samples[q])).total_seconds()
+        if raw[-1] == "quiet"
+        else 0
+    )
+    age = (datetime.now(timezone.utc) - _received_timestamp(latest)).total_seconds()
+    state = (
+        "Telemetry lost"
+        if age > 75
+        else (
+            "Insufficient evidence"
+            if active < 480
+            else ("Quiet confirmation" if raw[-1] == "quiet" else "Monitoring")
+        )
+    )
+    return {
+        "evidence": {
+            "state": state,
+            "active_seconds": round(active),
+            "required_active_seconds": 480,
+            "quiet_seconds": round(quiet),
+            "required_quiet_seconds": 240,
+            "packet_age_seconds": round(age),
+            "diagnostics": latest.get("diagnostics", {}),
+        }
+    }
+
+
+def _monitoring_command(path, secret, raw):
+    import time
+
+    now = int(time.time())
+    state = delivery.status(path, raw["device_id"], now)["session"]
+    seconds = (
+        max(0, min(14400, int(state["expires_at"] - now)))
+        if state and state["status"] == "monitoring"
+        else 0
+    )
+    payload = json.dumps(
+        {
+            "version": 1,
+            "event_id": raw["event_id"],
+            "session_id": raw["cycle_id"],
+            "lease_seconds": seconds,
+        },
+        separators=(",", ":"),
+    )
+    return {
+        "payload": payload,
+        "signature": hmac.new(
+            secret.encode(), b"monitoring-v1\n" + payload.encode(), hashlib.sha256
+        ).hexdigest(),
+    }
 
 
 def _current_observation_segment(samples: list[dict]) -> list[dict]:
@@ -1156,6 +1359,26 @@ def _monitor_html() -> str:
       </div>
     </section>
     <aside>
+      <section class="panel" style="margin-bottom:12px;padding:14px">
+        <h2 style="font-size:18px;margin-top:0">Load and phone alerts</h2>
+        <p id="load-state" role="status">Loading monitoring status…</p>
+        <p id="load-evidence" class="small"></p>
+        <p id="voice-status" class="small"></p>
+        <p class="small" id="call-instructions">Answer and press 1 within eight seconds to hear your alert. Calls end silently without a keypress.</p>
+        <div style="display:flex;flex-wrap:wrap;gap:8px">
+          <button data-action="start">Start load</button>
+          <button data-action="cancel" class="secondary">Cancel load</button>
+          <button data-action="pause" class="secondary">Pause calls</button>
+          <button data-action="resume" class="secondary">Resume calls</button>
+          <button data-action="test" class="secondary">Test phone call</button>
+        </div>
+        <p class="small" id="control-result" role="status"></p>
+        <label for="clip-preview">Preview a recording</label>
+        <select id="clip-preview"><option value="">Choose a clip</option></select>
+        <audio id="clip-player" controls preload="none" style="width:100%;margin-top:8px"></audio>
+        <p id="preview-error" class="small" role="status"></p>
+      </section>
+
       <section class="panel">
         <div class="connection-card">
           <div class="connection-node connection-offline" id="link-node">
@@ -1223,6 +1446,49 @@ def _monitor_html() -> str:
     </aside>
   </main>
   <script>
+    let monitoringStatus = null;
+    async function refreshOperations() {
+      try {
+        const response = await fetch('/api/v1/status');
+        if (!response.ok) throw new Error(`Status unavailable: HTTP ${response.status}`);
+        monitoringStatus = await response.json();
+        const e = monitoringStatus.evidence;
+        const session = monitoringStatus.session;
+        document.getElementById('load-state').textContent = session?.status === 'complete' ? 'Complete' : session?.status === 'expired' ? 'Monitoring expired' : e.state;
+        document.getElementById('load-evidence').textContent = `Observed activity ${e.active_seconds}s / ${e.required_active_seconds || 480}s. Quiet ${e.quiet_seconds || 0}s / ${e.required_quiet_seconds || 240}s.`;
+        const job = monitoringStatus.delivery[0];
+        const worker = monitoringStatus.worker;
+        const staleWorker = !worker || Date.now()/1000-worker.at > 75;
+        document.getElementById('voice-status').textContent = `${monitoringStatus.paused ? 'Calls paused. ' : ''}${monitoringStatus.backend === 'simulation' ? 'Development: simulated calls. ' : ''}${staleWorker ? 'Alert worker not checking in. ' : ''}${worker?.error ? `Worker error: ${worker.error}. ` : ''}${job ? `Latest alert: ${job.status}${job.error ? ' — '+job.error : ''}; clip ${job.message_key}.` : 'No phone alerts yet.'}`;
+        if (session?.status === 'monitoring' && document.getElementById('guess').textContent === 'Quiet / off') {
+          document.getElementById('guess').textContent = 'Low vibration';
+          document.getElementById('guess-detail').textContent = 'May be filling or paused; monitoring continues.';
+        }
+      } catch (error) { document.getElementById('load-state').textContent = error.message; }
+    }
+    document.querySelectorAll('[data-action]').forEach(button => button.addEventListener('click', async () => {
+      const action = button.dataset.action;
+      if (action === 'test' && !confirm('Place a test call now? Answer and press 1 within eight seconds to hear it. Without a keypress the call ends silently and may retry once.')) return;
+      button.disabled = true;
+      try {
+        const response = await fetch('/api/v1/control', {method:'POST',headers:{'Content-Type':'application/json','Idempotency-Key':crypto.randomUUID()},body:JSON.stringify({action})});
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.detail || 'Action failed');
+        document.getElementById('control-result').textContent = `${action}: accepted`;
+        await refreshOperations();
+      } catch (error) { document.getElementById('control-result').textContent = error.message; }
+      finally { button.disabled = false; }
+    }));
+    const preview = document.getElementById('clip-preview');
+    for (let i=1;i<=10;i++) { const key=`laundry-${String(i).padStart(2,'0')}`; preview.add(new Option(`Recording ${i}`,key)); }
+    preview.addEventListener('change', () => {
+      document.getElementById('preview-error').textContent = '';
+      const player = document.getElementById('clip-player');
+      if (preview.value) { player.src=`/api/v1/audio/${preview.value}`; player.play().catch(()=>{}); }
+    });
+    document.getElementById('clip-player').addEventListener('error', () => { document.getElementById('preview-error').textContent='Recording unavailable; audio has not been published or access was denied.'; });
+    refreshOperations(); setInterval(refreshOperations, 5000);
+
     const chart = document.getElementById('chart');
     const ctx = chart.getContext('2d');
     const DEFAULT_PACKET_CADENCE_MS = 15000;

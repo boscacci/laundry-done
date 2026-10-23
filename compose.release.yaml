@@ -1,0 +1,36 @@
+# Applied together with compose.yaml; preserve existing Caddy/Gotify until acceptance.
+services:
+  relay:
+    image: ${RELAY_IMAGE:?Set approved immutable RELAY_IMAGE}
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    read_only: true
+    tmpfs: [/tmp]
+    environment:
+      ALERT_BACKEND: voice
+      AUDIO_DIRECTORY: /audio
+      TRUSTED_PROXY_IPS: ${LAUNDRY_TRUSTED_PROXY_IPS:?Set exact Caddy proxy IP}
+    volumes:
+      - ./outputs/audio/v1:/audio:ro
+  voice-worker:
+    image: ${RELAY_IMAGE:?Set approved immutable RELAY_IMAGE}
+    restart: unless-stopped
+    command: [python, -m, laundry_done_relay.voice_worker]
+    environment:
+      ALERT_BACKEND: voice
+      DATABASE_PATH: /data/events.sqlite3
+      VOICE_API_URL: ${VOICE_API_URL:?Set approved dispatcher URL}
+      AWS_REGION: us-west-2
+      AWS_CONFIG_FILE: /credentials/config
+    volumes:
+      - ./data/relay:/data
+      - ./data/phone-identity/worker:/credentials:ro
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    read_only: true
+    tmpfs: [/tmp]
+    healthcheck:
+      test: [CMD, python, -c, "import sqlite3,time; c=sqlite3.connect('file:/data/events.sqlite3?mode=ro',uri=True); row=c.execute('select at from worker_health where id=1').fetchone(); assert row and time.time()-row[0]<75"]
+      interval: 20s
+      timeout: 3s
+      retries: 3
